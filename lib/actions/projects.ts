@@ -49,12 +49,16 @@ export async function createProject(data: {
         project_id: project.id,
         user_id: user.id,
         role: 'owner',
+        invitation_status: 'active',
+        joined_at: new Date().toISOString(),
       });
 
     if (memberError) {
       console.error('Member addition error:', memberError);
-      // Don't throw - project is created, just log the error
+      throw new Error(`Failed to add project owner: ${memberError.message}`);
     }
+
+    console.log('Project owner added successfully');
 
     // Step 3: Create a board for the project
     const { data: board, error: boardError } = await supabase
@@ -115,36 +119,30 @@ export async function getProjects() {
       return [];
     }
 
-    // Get all projects where user is a member
-    const { data: memberProjects, error: memberError } = await supabase
-      .from('project_members')
-      .select('project_id')
-      .eq('user_id', user.id);
-
-    if (memberError) {
-      console.error('Get member projects error:', memberError);
-      return [];
-    }
-
-    if (!memberProjects || memberProjects.length === 0) {
-      return [];
-    }
-
-    const projectIds = memberProjects.map(m => m.project_id);
-
-    // Get the actual project details
-    const { data: projects, error: projectsError } = await supabase
+    // Get owned projects
+    const { data: ownedProjects } = await supabase
       .from('projects')
       .select('*')
-      .in('id', projectIds)
-      .order('updated_at', { ascending: false });
+      .eq('created_by', user.id);
 
-    if (projectsError) {
-      console.error('Get projects error:', projectsError);
-      return [];
-    }
+    // Get member projects  
+    const { data: memberProjects } = await supabase
+      .from('project_members')
+      .select('project_id, projects(*)')
+      .eq('user_id', user.id)
+      .eq('invitation_status', 'active')
+      .neq('projects.created_by', user.id); // Exclude owned projects
 
-    return projects || [];
+    // Combine both lists
+    const allProjects = [
+      ...(ownedProjects || []),
+      ...(memberProjects?.map(m => m.projects).filter(Boolean) || [])
+    ];
+
+    // Sort by updated_at
+    allProjects.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+
+    return allProjects;
   } catch (error) {
     console.error('Get projects error:', error);
     return [];

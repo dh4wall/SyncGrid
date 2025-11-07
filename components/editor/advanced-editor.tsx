@@ -154,6 +154,24 @@ export function AdvancedEditor({
     }
   };
 
+  // Sync external content changes to the editor (for real-time updates)
+  useEffect(() => {
+    if (editor && content !== undefined) {
+      const currentContent = editor.getHTML();
+      // Only update if content is different to avoid cursor jumps
+      if (currentContent !== content) {
+        console.log('🔄 Editor: Updating content from external source');
+        
+        // Use setTimeout to defer the update and avoid flushSync errors
+        setTimeout(() => {
+          if (editor && !editor.isDestroyed) {
+            editor.commands.setContent(content, { emitUpdate: false });
+          }
+        }, 0);
+      }
+    }
+  }, [content, editor]);
+
   // Don't render until mounted to avoid hydration mismatch
   if (!mounted || !editor) {
     return (
@@ -175,7 +193,7 @@ export function AdvancedEditor({
         />
       )}
       
-      <div className="overflow-y-auto max-h-[calc(100vh-300px)]">
+      <div className="overflow-auto max-h-[calc(100vh-300px)]">
         <EditorContent editor={editor} />
       </div>
 

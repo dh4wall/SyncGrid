@@ -4,9 +4,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { AdvancedEditor } from '@/components/editor/advanced-editor';
 import { VersionHistory } from '@/components/editor/version-history';
+import { ActiveUsers } from '@/components/board/active-users';
 import { getPages, getPage, updatePage, createPage } from '@/lib/actions/pages';
 import { Button } from '@/components/ui/button';
 import { Plus, FileText } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 
 export default function EditorPage() {
   const params = useParams();
@@ -17,11 +19,87 @@ export default function EditorPage() {
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false); // Track when receiving remote updates
   const saveTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  const lastSaveTimestampRef = useRef<number>(0); // Track when we last saved
+  const ignoreNextUpdateRef = useRef(false); // Flag to ignore immediate next update
 
   useEffect(() => {
     loadPages();
   }, [projectId]);
+
+  // Real-time subscription for current page
+  useEffect(() => {
+    if (!currentPage?.id) return;
+
+    const supabase = createClient();
+    console.log('📝 Setting up realtime for page:', currentPage.id);
+
+    const channel = supabase
+      .channel(`page-${currentPage.id}`, {
+        config: {
+          broadcast: { self: false },
+          presence: { key: currentPage.id }
+        }
+      })
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
+          schema: 'public',
+          table: 'pages',
+          filter: `id=eq.${currentPage.id}`,
+        },
+        (payload: any) => {
+          console.log('📝 Page change detected - Event:', payload.eventType);
+          console.log('📝 Payload new content:', payload.new?.content?.substring(0, 100));
+          console.log('📝 ignoreNextUpdate:', ignoreNextUpdateRef.current);
+          
+          // Check if this is our own change (within 2 seconds of our last save)
+          const timeSinceLastSave = Date.now() - lastSaveTimestampRef.current;
+          const isOwnChange = ignoreNextUpdateRef.current || timeSinceLastSave < 2000;
+          
+          if (isOwnChange) {
+            console.log('📝 Ignoring own change (time since save:', timeSinceLastSave, 'ms)');
+            ignoreNextUpdateRef.current = false; // Reset flag
+            return;
+          }
+          
+          console.log('📝 Processing remote change');
+          setSyncing(true);
+          const newContent = payload.new?.content;
+          
+          // Always update with new content from remote
+          if (newContent !== undefined) {
+            console.log('📝 Updating content from remote - length:', newContent?.length);
+            setContent(newContent || '');
+          }
+          
+          // Clear syncing indicator after a short delay
+          setTimeout(() => setSyncing(false), 1000);
+        }
+      )
+      .subscribe((status: string, err: any) => {
+        console.log('📝 Page realtime status:', status);
+        if (err) {
+          console.error('📝 Subscription error:', err);
+        }
+        if (status === 'SUBSCRIBED') {
+          console.log('📝 ✅ Successfully subscribed to page updates');
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('📝 ❌ Channel error - check Supabase connection');
+        } else if (status === 'TIMED_OUT') {
+          console.error('📝 ❌ Connection timed out');
+        } else if (status === 'CLOSED') {
+          console.log('📝 Channel closed');
+        }
+      });
+
+    return () => {
+      console.log('📝 Cleaning up page realtime subscription');
+      supabase.removeChannel(channel);
+    };
+  }, [currentPage?.id]); // Only re-subscribe when page changes
 
   const loadPages = async () => {
     const data = await getPages(projectId);
@@ -55,6 +133,8 @@ export default function EditorPage() {
     saveTimeoutRef.current = setTimeout(async () => {
       if (currentPage) {
         setSaving(true);
+        ignoreNextUpdateRef.current = true; // Mark to ignore next realtime update
+        lastSaveTimestampRef.current = Date.now(); // Record save time
         try {
           await updatePage({
             pageId: currentPage.id,
@@ -62,8 +142,11 @@ export default function EditorPage() {
             projectId,
             createVersion: false, // Don't create version on every auto-save
           });
+          console.log('📝 Auto-saved successfully');
+          // Flag will be reset when realtime event arrives
         } catch (error) {
           console.error('Auto-save failed:', error);
+          ignoreNextUpdateRef.current = false; // Reset on error
         }
         setSaving(false);
       }
@@ -73,6 +156,8 @@ export default function EditorPage() {
   const handleSaveVersion = async () => {
     if (currentPage) {
       setSaving(true);
+      ignoreNextUpdateRef.current = true; // Mark to ignore next realtime update
+      lastSaveTimestampRef.current = Date.now(); // Record save time
       const summary = prompt('Enter a summary for this version (optional):');
       await updatePage({
         pageId: currentPage.id,
@@ -148,10 +233,13 @@ export default function EditorPage() {
         {currentPage ? (
           <>
             <div className="border-b p-4 bg-white flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold">{currentPage.title}</h1>
-                <p className="text-sm text-gray-600 mt-1">
-                  {saving ? 'Saving...' : 'Saved'} • Version {currentPage.current_version}
+              <div className="flex-1">
+                <div className="flex items-center justify-between mb-1">
+                  <h1 className="text-2xl font-bold">{currentPage.title}</h1>
+                  {currentPage.id && <ActiveUsers roomId={currentPage.id} roomType="page" />}
+                </div>
+                <p className="text-sm text-gray-600">
+                  {syncing ? '🔄 Syncing changes...' : saving ? 'Saving...' : 'Saved'} • Version {currentPage.current_version}
                 </p>
               </div>
               <div className="flex gap-2">

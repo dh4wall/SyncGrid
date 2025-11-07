@@ -226,7 +226,7 @@
 
 /* Image */
 .ProseMirror img {
-  max-width: 100%;
+  /* Removed max-width to allow resizing beyond container width */
   height: auto;
   border-radius: 0.5rem;
   margin-top: 1rem;
@@ -306,4 +306,23 @@
   float: left;
   height: 0;
   pointer-events: none;
+}
+
+/* Resizable Image - Free Positioning */
+.ProseMirror [data-type="resizableImage"] {
+  display: inline-block !important;
+  vertical-align: top;
+  margin: 0.5rem;
+}
+
+.ProseMirror div[data-node-view-wrapper] {
+  display: inline-block !important;
+  vertical-align: top;
+}
+
+/* Allow images to be placed side by side */
+.ProseMirror .node-resizableImage {
+  display: inline-block !important;
+  margin: 0.5rem;
+  vertical-align: top;
 }

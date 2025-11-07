@@ -116,16 +116,11 @@ function ResizableImageComponent({
 
   return (
     <NodeViewWrapper 
-      className="not-prose node-resizableImage"
-      style={{ 
-        display: 'inline-block',
-        margin: '0.5rem',
-        verticalAlign: 'top',
-      }}
+      as="span"
+      className="inline-block align-top my-2"
       contentEditable={false}
       draggable
       data-drag-handle
-      data-type="resizableImage"
     >
       <span
         className="relative inline-block"
@@ -133,7 +128,7 @@ function ResizableImageComponent({
           display: 'inline-block',
           width: `${width}px`,
           height: `${height}px`,
-          maxWidth: 'none',
+          maxWidth: '100%',
         }}
       >
         <img
@@ -198,8 +193,8 @@ function ResizableImageComponent({
 
 export const ResizableImage = Node.create({
   name: 'resizableImage',
-  group: 'block',
-  atom: true,
+  group: 'inline',
+  inline: true,
   draggable: true,
 
   addAttributes() {

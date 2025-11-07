@@ -15,8 +15,10 @@ import {
 import { arrayMove } from '@dnd-kit/sortable';
 import { KanbanColumn } from '@/components/board/kanban-column';
 import { AddCardDialog } from '@/components/board/add-card-dialog';
+import { ActiveUsers } from '@/components/board/active-users';
 import { getBoard, moveCard } from '@/lib/actions/boards';
 import { useParams } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
 
 export default function BoardPage() {
   const params = useParams();
@@ -26,7 +28,9 @@ export default function BoardPage() {
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeCard, setActiveCard] = useState<any>(null);
-  const [originalBoard, setOriginalBoard] = useState<any>(null); // Store original state before drag
+  const [originalBoard, setOriginalBoard] = useState<any>(null);
+  const [isDragging, setIsDragging] = useState(false); // Track if user is currently dragging
+  const [syncing, setSyncing] = useState(false); // Track when receiving remote updates
   const [addCardDialog, setAddCardDialog] = useState<{
     open: boolean;
     columnId: string;
@@ -36,7 +40,7 @@ export default function BoardPage() {
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 5, // 5px movement before drag starts
+        distance: 5,
       },
     })
   );
@@ -44,6 +48,63 @@ export default function BoardPage() {
   useEffect(() => {
     loadBoard();
   }, [projectId]);
+
+  // Real-time subscription
+  useEffect(() => {
+    if (!board?.id) return;
+
+    const supabase = createClient();
+    console.log('🔴 Setting up realtime for board:', board.id);
+
+    const channel = supabase
+      .channel(`board-${board.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'cards',
+        },
+        (payload: any) => {
+          console.log('🔴 Card change detected:', payload);
+          // Only reload if we're not currently dragging
+          if (!isDragging) {
+            console.log('🔴 Reloading board due to card change');
+            setSyncing(true);
+            loadBoard().then(() => {
+              setTimeout(() => setSyncing(false), 500);
+            });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'columns',
+          filter: `board_id=eq.${board.id}`,
+        },
+        (payload: any) => {
+          console.log('🔴 Column change detected:', payload);
+          if (!isDragging) {
+            console.log('🔴 Reloading board due to column change');
+            setSyncing(true);
+            loadBoard().then(() => {
+              setTimeout(() => setSyncing(false), 500);
+            });
+          }
+        }
+      )
+      .subscribe((status: string) => {
+        console.log('🔴 Realtime status:', status);
+      });
+
+    return () => {
+      console.log('🔴 Cleaning up realtime subscription');
+      channel.unsubscribe();
+    };
+  }, [board?.id, isDragging]);
 
   const loadBoard = async () => {
     const data = await getBoard(projectId);
@@ -91,6 +152,7 @@ export default function BoardPage() {
   const handleDragStart = (event: DragStartEvent) => {
     const cardId = event.active.id as string;
     setActiveId(cardId);
+    setIsDragging(true); // Set dragging flag
 
     // Store the original board state before any drag operations
     setOriginalBoard(JSON.parse(JSON.stringify(board)));
@@ -254,12 +316,15 @@ export default function BoardPage() {
       // On error, revert to original state
       setBoard(originalBoard);
       setOriginalBoard(null);
+    } finally {
+      setIsDragging(false); // Clear dragging flag
     }
   };
 
   const handleDragCancel = () => {
     setActiveId(null);
     setActiveCard(null);
+    setIsDragging(false); // Clear dragging flag
     // Revert to original state
     if (originalBoard) {
       setBoard(originalBoard);
@@ -286,8 +351,18 @@ export default function BoardPage() {
   return (
     <div className="h-full flex flex-col">
       <div className="border-b p-3 sm:p-4 md:p-4 bg-white">
-        <h1 className="text-xl sm:text-2xl font-bold">{board.name}</h1>
-        <p className="text-xs sm:text-sm text-gray-600 mt-1">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl sm:text-2xl font-bold">{board.name}</h1>
+            {syncing && (
+              <span className="text-sm text-blue-600 animate-pulse">
+                🔄 Syncing...
+              </span>
+            )}
+          </div>
+          {board.id && <ActiveUsers roomId={board.id} roomType="board" />}
+        </div>
+        <p className="text-xs sm:text-sm text-gray-600">
           Drag cards to reorder or move between columns
         </p>
       </div>

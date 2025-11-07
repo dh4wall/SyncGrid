@@ -18,8 +18,10 @@ function ResizableImageComponent({
   selected 
 }: ResizableImageProps) {
   const imageRef = useRef<HTMLImageElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [isResizing, setIsResizing] = useState(false);
   
+  // Get dimensions from node attributes
   const getWidth = () => {
     if (node.attrs.width && node.attrs.width !== 'auto') {
       const parsed = parseInt(node.attrs.width);
@@ -43,6 +45,7 @@ function ResizableImageComponent({
   const [width, setWidth] = useState(getWidth());
   const [height, setHeight] = useState(getHeight());
 
+  // Sync with node attributes
   useEffect(() => {
     if (!isResizing) {
       setWidth(getWidth());
@@ -50,6 +53,7 @@ function ResizableImageComponent({
     }
   }, [node.attrs.width, node.attrs.height, isResizing]);
 
+  // Calculate height on image load
   useEffect(() => {
     const img = imageRef.current;
     if (!img) return;
@@ -101,6 +105,9 @@ function ResizableImageComponent({
 
     const handleMouseUp = () => {
       setIsResizing(false);
+      
+      // Use the captured finalWidth and finalHeight instead of state
+      console.log('🖼️ Saving image size:', { width: finalWidth, height: finalHeight });
       updateAttributes({
         width: `${finalWidth}px`,
         height: `${finalHeight}px`,
@@ -116,57 +123,63 @@ function ResizableImageComponent({
 
   return (
     <NodeViewWrapper 
-      className="not-prose node-resizableImage"
-      style={{ 
-        display: 'inline-block',
-        margin: '0.5rem',
-        verticalAlign: 'top',
-      }}
-      contentEditable={false}
-      draggable
-      data-drag-handle
-      data-type="resizableImage"
+      className="inline-block my-4 mx-0"
+      style={{ display: 'inline-block', verticalAlign: 'top' }}
     >
-      <span
-        className="relative inline-block"
+      <div
+        ref={containerRef}
+        className="relative inline-block group"
+        data-drag-handle
         style={{
-          display: 'inline-block',
           width: `${width}px`,
           height: `${height}px`,
-          maxWidth: 'none',
+          outline: selected ? '2px solid #3b82f6' : 'none',
+          outlineOffset: '4px',
+          borderRadius: '8px',
+          transition: 'outline 0.2s ease',
+          cursor: 'move',
         }}
       >
         <img
           ref={imageRef}
           src={node.attrs.src}
           alt={node.attrs.alt || ''}
+          className="rounded-lg select-none transition-shadow"
           draggable={false}
           style={{
             width: '100%',
             height: '100%',
             objectFit: 'contain',
             display: 'block',
-            borderRadius: '0.5rem',
-            boxShadow: selected ? '0 0 0 2px #3b82f6' : 'none',
+            pointerEvents: 'none',
+            boxShadow: selected ? '0 4px 6px -1px rgb(0 0 0 / 0.1)' : 'none',
           }}
         />
 
         {selected && (
           <>
-            {/* Resize Handles */}
-            {['se', 'sw', 'ne', 'nw'].map((corner) => (
-              <div
-                key={corner}
-                className={`absolute w-3 h-3 bg-blue-500 hover:bg-blue-600 rounded-full border border-white cursor-${corner}-resize`}
-                style={{
-                  [corner.includes('s') ? 'bottom' : 'top']: '-6px',
-                  [corner.includes('e') ? 'right' : 'left']: '-6px',
-                  zIndex: 10,
-                }}
-                onMouseDown={(e) => handleResize(e, corner)}
-              />
-            ))}
-
+            {/* Resize Handles - Positioned outside the image */}
+            <div
+              className="absolute -bottom-2 -right-2 w-6 h-6 bg-blue-500 hover:bg-blue-600 cursor-se-resize rounded-full border-2 border-white shadow-md z-10 transition-all hover:scale-110"
+              onMouseDown={(e) => handleResize(e, 'se')}
+              title="Resize"
+            />
+            <div
+              className="absolute -bottom-2 -left-2 w-6 h-6 bg-blue-500 hover:bg-blue-600 cursor-sw-resize rounded-full border-2 border-white shadow-md z-10 transition-all hover:scale-110"
+              onMouseDown={(e) => handleResize(e, 'sw')}
+              title="Resize"
+            />
+            <div
+              className="absolute -top-2 -right-2 w-6 h-6 bg-blue-500 hover:bg-blue-600 cursor-ne-resize rounded-full border-2 border-white shadow-md z-10 transition-all hover:scale-110"
+              onMouseDown={(e) => handleResize(e, 'ne')}
+              title="Resize"
+            />
+            <div
+              className="absolute -top-2 -left-2 w-6 h-6 bg-blue-500 hover:bg-blue-600 cursor-nw-resize rounded-full border-2 border-white shadow-md z-10 transition-all hover:scale-110"
+              onMouseDown={(e) => handleResize(e, 'nw')}
+              title="Resize"
+            />
+            
             {/* Delete Button */}
             <button
               onClick={(e) => {
@@ -174,24 +187,29 @@ function ResizableImageComponent({
                 e.stopPropagation();
                 deleteNode();
               }}
-              className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full text-xs flex items-center justify-center"
-              style={{ zIndex: 10 }}
+              className="absolute -top-2 -right-12 bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium shadow-md z-10 transition-all hover:scale-105 flex items-center gap-1"
+              title="Delete image"
             >
-              ✕
+              <span>✕</span>
             </button>
-
-            {/* Size Indicator */}
+            
+            {/* Drag Hint - Floating overlay */}
+            <div className="absolute top-2 left-2 bg-blue-500/95 text-white px-2.5 py-1.5 rounded-md text-xs font-medium shadow-md z-10 backdrop-blur-sm flex items-center gap-1.5">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+              </svg>
+              <span>Drag to move</span>
+            </div>
+            
+            {/* Size Indicator - Only during resize */}
             {isResizing && (
-              <div 
-                className="absolute bottom-1 left-1 bg-black/80 text-white px-2 py-0.5 rounded text-xs font-mono"
-                style={{ zIndex: 10 }}
-              >
+              <div className="absolute bottom-2 right-2 bg-black/90 text-white px-3 py-1.5 rounded-lg text-sm font-mono shadow-lg z-10">
                 {width} × {height}
               </div>
             )}
           </>
         )}
-      </span>
+      </div>
     </NodeViewWrapper>
   );
 }
@@ -199,7 +217,6 @@ function ResizableImageComponent({
 export const ResizableImage = Node.create({
   name: 'resizableImage',
   group: 'block',
-  atom: true,
   draggable: true,
 
   addAttributes() {
