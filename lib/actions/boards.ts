@@ -33,12 +33,19 @@ export async function getBoard(projectId: string) {
     return null;
   }
 
+  console.log('🔵 SERVER: Found', columns?.length, 'columns');
+  console.log('🔵 SERVER: Column IDs:', columns?.map(c => c.id));
+
   // Get cards for all columns
   const { data: cards, error: cardsError } = await supabase
     .from('cards')
     .select('*')
     .in('column_id', columns.map(c => c.id))
     .order('position', { ascending: true });
+
+  console.log('🔵 SERVER: Cards query error?', cardsError);
+  console.log('🔵 SERVER: Found', cards?.length, 'cards');
+  console.log('🔵 SERVER: Cards data:', cards);
 
   if (cardsError) {
     console.error('Get cards error:', cardsError);
@@ -74,6 +81,13 @@ export async function createCard(data: {
     throw new Error('Unauthorized');
   }
 
+  // Get the board ID from the column
+  const { data: column } = await supabase
+    .from('columns')
+    .select('board_id')
+    .eq('id', data.columnId)
+    .single();
+
   // Get max position in column
   const { data: cards } = await supabase
     .from('cards')
@@ -97,11 +111,15 @@ export async function createCard(data: {
     .select()
     .single();
 
+  console.log('🔵 SERVER: Card created:', card);
+  console.log('🔵 SERVER: Card error:', error);
+
   if (error) {
     console.error('Create card error:', error);
     throw new Error(error.message);
   }
 
+  // Liveblocks handles real-time broadcasting on the client side
   revalidatePath(`/projects/${data.projectId}/board`);
   return card;
 }
@@ -115,6 +133,13 @@ export async function updateCard(cardId: string, data: {
   projectId: string;
 }) {
   const supabase = await createServerSupabaseClient();
+
+  // Get the board ID from the card
+  const { data: cardData } = await supabase
+    .from('cards')
+    .select('column_id, columns!inner(board_id)')
+    .eq('id', cardId)
+    .single();
 
   const updateData: any = {};
   if (data.title !== undefined) updateData.title = data.title;
@@ -133,6 +158,9 @@ export async function updateCard(cardId: string, data: {
     throw new Error(error.message);
   }
 
+  // Broadcast the change to all connected clients
+  const boardId = (cardData as any)?.columns?.board_id;
+
   // Only revalidate for position/column changes (drag operations)
   // For title/description/color changes, use optimistic updates on the client
   if (data.columnId !== undefined || data.position !== undefined) {
@@ -143,6 +171,13 @@ export async function updateCard(cardId: string, data: {
 export async function deleteCard(cardId: string, projectId: string) {
   const supabase = await createServerSupabaseClient();
 
+  // Get the board ID from the card before deleting
+  const { data: cardData } = await supabase
+    .from('cards')
+    .select('column_id, columns!inner(board_id)')
+    .eq('id', cardId)
+    .single();
+
   const { error } = await supabase
     .from('cards')
     .delete()
@@ -152,6 +187,9 @@ export async function deleteCard(cardId: string, projectId: string) {
     console.error('Delete card error:', error);
     throw new Error(error.message);
   }
+
+  // Broadcast the change to all connected clients
+  const boardId = (cardData as any)?.columns?.board_id;
 
   revalidatePath(`/projects/${projectId}/board`);
 }
@@ -165,6 +203,13 @@ export async function moveCard(data: {
   projectId: string;
 }) {
   const supabase = await createServerSupabaseClient();
+
+  // Get the board ID from the source column
+  const { data: column } = await supabase
+    .from('columns')
+    .select('board_id')
+    .eq('id', data.sourceColumnId)
+    .single();
 
   // If moving within same column
   if (data.sourceColumnId === data.destColumnId) {
@@ -237,6 +282,8 @@ export async function moveCard(data: {
       })
       .eq('id', data.cardId);
   }
+
+  // Broadcast the change to all connected clients
 
   revalidatePath(`/projects/${data.projectId}/board`);
 }

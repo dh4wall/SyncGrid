@@ -16,12 +16,14 @@ import { TextAlign } from '@tiptap/extension-text-align';
 import { Underline } from '@tiptap/extension-underline';
 import { Typography } from '@tiptap/extension-typography';
 import { common, createLowlight } from 'lowlight';
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { EditorToolbar } from './editor-toolbar';
 import { TableDialog } from './table-dialog';
 import { ImageDialog } from './image-dialog';
 import { ResizableImage } from './resizable-image';
 import { SlashCommand, createSlashCommandSuggestion } from './slash-command';
+import { createMentionExtension, MentionSuggestion } from './mention-extension';
+import { getProjectMembers } from '@/lib/queries/members';
 import './editor-styles.css';
 
 const lowlight = createLowlight(common);
@@ -31,17 +33,41 @@ interface AdvancedEditorProps {
   onChange?: (content: string) => void;
   editable?: boolean;
   placeholder?: string;
+  projectId?: string; // Add projectId for fetching members
 }
 
 export function AdvancedEditor({
   content = '',
   onChange,
   editable = true,
-  placeholder = "Type '/' for commands, or start writing...",
+  placeholder = "Type '/' for commands, '@' to mention, or start writing...",
+  projectId,
 }: AdvancedEditorProps) {
   const [tableDialogOpen, setTableDialogOpen] = useState(false);
   const [imageDialogOpen, setImageDialogOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const projectMembersRef = useRef<MentionSuggestion[]>([]);
+
+  // Load project members for @mention autocomplete
+  useEffect(() => {
+    async function loadMembers() {
+      if (projectId) {
+        try {
+          const members = await getProjectMembers(projectId);
+          // Transform ProjectMember[] to MentionSuggestion[]
+          const suggestions = members.map(member => ({
+            id: member.id,
+            label: member.full_name || member.email,
+            email: member.email,
+          }));
+          projectMembersRef.current = suggestions;
+        } catch (error) {
+          console.error('Failed to load project members:', error);
+        }
+      }
+    }
+    loadMembers();
+  }, [projectId]);
 
   useEffect(() => {
     setMounted(true);
@@ -55,70 +81,74 @@ export function AdvancedEditor({
     setImageDialogOpen(true);
   }, []);
 
+  // Memoize extensions to prevent recreation on every render
+  const extensions = useMemo(() => [
+    StarterKit.configure({
+      codeBlock: false,
+      heading: {
+        levels: [1, 2, 3, 4, 5, 6],
+      },
+    }),
+    Underline,
+    Highlight.configure({
+      multicolor: true,
+    }),
+    TextAlign.configure({
+      types: ['heading', 'paragraph'],
+    }),
+    Link.configure({
+      openOnClick: false,
+      HTMLAttributes: {
+        class: 'text-blue-600 underline cursor-pointer',
+      },
+    }),
+    ResizableImage,
+    Table.configure({
+      resizable: true,
+      HTMLAttributes: {
+        class: 'border-collapse table-auto w-full my-4',
+      },
+    }),
+    TableRow,
+    TableHeader.configure({
+      HTMLAttributes: {
+        class: 'border border-gray-300 px-4 py-2 bg-gray-50 font-semibold text-left',
+      },
+    }),
+    TableCell.configure({
+      HTMLAttributes: {
+        class: 'border border-gray-300 px-4 py-2',
+      },
+    }),
+    CodeBlockLowlight.configure({
+      lowlight,
+      HTMLAttributes: {
+        class: 'bg-gray-900 text-gray-100 p-4 rounded-lg my-4 font-mono text-sm overflow-x-auto',
+      },
+    }),
+    TaskList.configure({
+      HTMLAttributes: {
+        class: 'list-none pl-0',
+      },
+    }),
+    TaskItem.configure({
+      HTMLAttributes: {
+        class: 'flex items-start gap-2',
+      },
+      nested: true,
+    }),
+    Placeholder.configure({
+      placeholder,
+    }),
+    Typography,
+    SlashCommand.configure({
+      suggestion: createSlashCommandSuggestion(handleTableCreate, handleImageUpload),
+    }),
+    createMentionExtension(() => projectMembersRef.current),
+  ], [placeholder, handleTableCreate, handleImageUpload]);
+
   const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        codeBlock: false, // We'll use CodeBlockLowlight instead
-        heading: {
-          levels: [1, 2, 3, 4, 5, 6],
-        },
-      }),
-      Underline,
-      Highlight.configure({
-        multicolor: true,
-      }),
-      TextAlign.configure({
-        types: ['heading', 'paragraph'],
-      }),
-      Link.configure({
-        openOnClick: false,
-        HTMLAttributes: {
-          class: 'text-blue-600 underline cursor-pointer',
-        },
-      }),
-      ResizableImage,
-      Table.configure({
-        resizable: true,
-        HTMLAttributes: {
-          class: 'border-collapse table-auto w-full my-4',
-        },
-      }),
-      TableRow,
-      TableHeader.configure({
-        HTMLAttributes: {
-          class: 'border border-gray-300 px-4 py-2 bg-gray-50 font-semibold text-left',
-        },
-      }),
-      TableCell.configure({
-        HTMLAttributes: {
-          class: 'border border-gray-300 px-4 py-2',
-        },
-      }),
-      CodeBlockLowlight.configure({
-        lowlight,
-        HTMLAttributes: {
-          class: 'bg-gray-900 text-gray-100 p-4 rounded-lg my-4 font-mono text-sm overflow-x-auto',
-        },
-      }),
-      TaskList.configure({
-        HTMLAttributes: {
-          class: 'list-none pl-0',
-        },
-      }),
-      TaskItem.configure({
-        HTMLAttributes: {
-          class: 'flex items-start gap-2',
-        },
-        nested: true,
-      }),
-      Placeholder.configure({
-        placeholder,
-      }),
-      Typography,
-      SlashCommand.configure({
-        suggestion: createSlashCommandSuggestion(handleTableCreate, handleImageUpload),
-      }),
-    ],
+    extensions,
     content,
     editable,
     immediatelyRender: false,
@@ -133,7 +163,14 @@ export function AdvancedEditor({
         onChange(html);
       }
     },
-  });
+  }, [extensions, editable]); // Only recreate if extensions or editable changes
+
+  // Update editor content when content prop changes
+  useEffect(() => {
+    if (editor && content && editor.getHTML() !== content) {
+      editor.commands.setContent(content);
+    }
+  }, [editor, content]);
 
   const handleInsertTable = (rows: number, cols: number) => {
     if (editor) {
@@ -160,8 +197,6 @@ export function AdvancedEditor({
       const currentContent = editor.getHTML();
       // Only update if content is different to avoid cursor jumps
       if (currentContent !== content) {
-        console.log('🔄 Editor: Updating content from external source');
-        
         // Use setTimeout to defer the update and avoid flushSync errors
         setTimeout(() => {
           if (editor && !editor.isDestroyed) {

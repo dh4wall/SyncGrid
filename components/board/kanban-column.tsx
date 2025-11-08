@@ -27,6 +27,8 @@ interface KanbanColumnProps {
 export function KanbanColumn({ id, title, cards, onAddCard, projectId, onRefresh, onUpdate }: KanbanColumnProps) {
   const { setNodeRef } = useDroppable({ id });
 
+  console.log(`🔵 KanbanColumn ${title} received ${cards.length} cards:`, cards.map(c => c.title));
+
   return (
     <div className="shrink-0 w-64 sm:w-72 md:w-80">
       <div className="bg-gray-100 rounded-lg p-3 sm:p-4 h-full flex flex-col">

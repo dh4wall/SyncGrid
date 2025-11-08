@@ -1,36 +1,51 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   DndContext,
   DragEndEvent,
   DragStartEvent,
-  DragOverEvent,
+  DragMoveEvent,
   PointerSensor,
   useSensor,
   useSensors,
-  closestCorners,
   DragOverlay,
 } from '@dnd-kit/core';
 import { arrayMove } from '@dnd-kit/sortable';
 import { KanbanColumn } from '@/components/board/kanban-column';
+import { KanbanCard } from '@/components/board/kanban-card';
 import { AddCardDialog } from '@/components/board/add-card-dialog';
 import { ActiveUsers } from '@/components/board/active-users';
-import { getBoard, moveCard } from '@/lib/actions/boards';
-import { useParams } from 'next/navigation';
+import { CursorPresence } from '@/components/presence/cursor-presence';
+import { moveCard } from '@/lib/actions/boards';
+import { getBoardClient } from '@/lib/queries/client';
 import { createClient } from '@/lib/supabase/client';
+import { useParams } from 'next/navigation';
+import { useUser } from '@/lib/hooks';
+import { Loader2 } from 'lucide-react';
+
 
 export default function BoardPage() {
   const params = useParams();
   const projectId = params.id as string;
+  const { user } = useUser();
 
   const [board, setBoard] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeCard, setActiveCard] = useState<any>(null);
-  const [originalBoard, setOriginalBoard] = useState<any>(null);
-  const [isDragging, setIsDragging] = useState(false); // Track if user is currently dragging
-  const [syncing, setSyncing] = useState(false); // Track when receiving remote updates
+  const [remoteDragStates, setRemoteDragStates] = useState<Map<string, {
+    cardId: string;
+    userId: string;
+    userName: string;
+    userColor: string;
+    card: any;
+    cursorX: number;
+    cursorY: number;
+  }>>(new Map());
+  const broadcastChannelRef = useRef<any>(null);
+  const boardIdRef = useRef<string | null>(null); 
+  const isChannelSetupRef = useRef(false); 
   const [addCardDialog, setAddCardDialog] = useState<{
     open: boolean;
     columnId: string;
@@ -39,85 +54,188 @@ export default function BoardPage() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 5,
-      },
+      activationConstraint: { distance: 5 },
     })
   );
 
   useEffect(() => {
-    loadBoard();
+    const initBoard = async () => {
+      const data = await getBoardClient(projectId);
+      setBoard(data);
+      setLoading(false);
+      
+      if (data?.id) {
+        boardIdRef.current = data.id;
+      }
+    };
+    
+    initBoard();
   }, [projectId]);
 
-  // Real-time subscription
+  
   useEffect(() => {
-    if (!board?.id) return;
+    if (!boardIdRef.current || isChannelSetupRef.current) return;
 
     const supabase = createClient();
-    console.log('🔴 Setting up realtime for board:', board.id);
 
-    const channel = supabase
-      .channel(`board-${board.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'cards',
-        },
-        (payload: any) => {
-          console.log('🔴 Card change detected:', payload);
-          // Only reload if we're not currently dragging
-          if (!isDragging) {
-            console.log('🔴 Reloading board due to card change');
-            setSyncing(true);
-            loadBoard().then(() => {
-              setTimeout(() => setSyncing(false), 500);
-            });
+    isChannelSetupRef.current = true;
+
+    const broadcastCh = supabase.channel(`board-broadcast-${boardIdRef.current}`, {
+      config: { 
+        broadcast: { self: false },
+        presence: { key: '' }
+      }
+    });
+
+    broadcastCh
+      .on('broadcast', { event: 'drag-start' }, (payload: any) => {
+        const { cardId, userId, userName, userColor, card } = payload.payload;
+        setRemoteDragStates(prev => {
+          const newMap = new Map(prev);
+          newMap.set(userId, { cardId, userId, userName, userColor, card, cursorX: 0, cursorY: 0 });
+          return newMap;
+        });
+      })
+      .on('broadcast', { event: 'drag-move' }, (payload: any) => {
+        const { userId, x, y } = payload.payload;
+        setRemoteDragStates(prev => {
+          const existing = prev.get(userId);
+          if (!existing) return prev;
+          const newMap = new Map(prev);
+          newMap.set(userId, { ...existing, cursorX: x, cursorY: y });
+          return newMap;
+        });
+      })
+      .on('broadcast', { event: 'drag-end' }, (payload: any) => {
+        const { userId } = payload.payload;
+        setRemoteDragStates(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(userId);
+          return newMap;
+        });
+      })
+      .on('broadcast', { event: 'user-leave' }, (payload: any) => {
+        const { userId } = payload.payload;
+        setRemoteDragStates(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(userId);
+          return newMap;
+        });
+      })
+      .on('broadcast', { event: 'move' }, (payload: any) => {
+        const { cardId, sourceColumnId, destColumnId, destIndex } = payload.payload;
+        
+        setBoard((prevBoard: any) => {
+          if (!prevBoard) return prevBoard;
+
+          const sourceCol = prevBoard.columns.find((col: any) => col.id === sourceColumnId);
+          const destCol = prevBoard.columns.find((col: any) => col.id === destColumnId);
+          
+          if (!sourceCol || !destCol) return prevBoard;
+
+          const cardToMove = sourceCol.cards.find((c: any) => c.id === cardId);
+          if (!cardToMove) return prevBoard;
+
+          const newSourceCards = sourceCol.cards.filter((c: any) => c.id !== cardId);
+          
+          const newDestCards = [...destCol.cards];
+          if (sourceColumnId === destColumnId) {
+            const oldIndex = sourceCol.cards.findIndex((c: any) => c.id === cardId);
+            newDestCards.splice(oldIndex, 1);
+            newDestCards.splice(destIndex, 0, cardToMove);
+          } else {
+            newDestCards.splice(destIndex, 0, { ...cardToMove, column_id: destColumnId });
           }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'columns',
-          filter: `board_id=eq.${board.id}`,
-        },
-        (payload: any) => {
-          console.log('🔴 Column change detected:', payload);
-          if (!isDragging) {
-            console.log('🔴 Reloading board due to column change');
-            setSyncing(true);
-            loadBoard().then(() => {
-              setTimeout(() => setSyncing(false), 500);
-            });
-          }
-        }
-      )
-      .subscribe((status: string) => {
-        console.log('🔴 Realtime status:', status);
+
+          return {
+            ...prevBoard,
+            columns: prevBoard.columns.map((col: any) => {
+              if (col.id === sourceColumnId) {
+                return sourceColumnId === destColumnId 
+                  ? { ...col, cards: newDestCards }
+                  : { ...col, cards: newSourceCards };
+              }
+              if (col.id === destColumnId && sourceColumnId !== destColumnId) {
+                return { ...col, cards: newDestCards };
+              }
+              return col;
+            }),
+          };
+        });
+      })
+      .on('broadcast', { event: 'update' }, (payload: any) => {
+        const { cardId, updates } = payload.payload;
+        setBoard((prevBoard: any) => {
+          if (!prevBoard) return prevBoard;
+          return {
+            ...prevBoard,
+            columns: prevBoard.columns.map((col: any) => ({
+              ...col,
+              cards: col.cards.map((card: any) =>
+                card.id === cardId ? { ...card, ...updates } : card
+              ),
+            })),
+          };
+        });
+      })
+      .subscribe((status) => {
       });
 
-    return () => {
-      console.log('🔴 Cleaning up realtime subscription');
-      channel.unsubscribe();
+    broadcastChannelRef.current = broadcastCh;
+
+    const handleBeforeUnload = () => {
+      if (user?.id) {
+        broadcastCh.send({
+          type: 'broadcast',
+          event: 'user-leave',
+          payload: { userId: user.id }
+        });
+      }
     };
-  }, [board?.id, isDragging]);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    const handleVisibilityChange = () => {
+      if (document.hidden && user?.id) {
+        broadcastCh.send({
+          type: 'broadcast',
+          event: 'user-leave',
+          payload: { userId: user.id }
+        });
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      if (user?.id) {
+        broadcastCh.send({
+          type: 'broadcast',
+          event: 'user-leave',
+          payload: { userId: user.id }
+        });
+      }
+      
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      
+      isChannelSetupRef.current = false;
+      supabase.removeChannel(broadcastCh);
+    };
+  }, [boardIdRef.current, user?.id]); 
 
   const loadBoard = async () => {
-    const data = await getBoard(projectId);
+    const data = await getBoardClient(projectId);
     setBoard(data);
-    setLoading(false);
   };
 
-  const refreshBoard = () => {
-    loadBoard();
+  const getUserColor = () => {
+    if (!user?.id) return '#3B82F6';
+    const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
+    const hash = user.id.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
+    return colors[hash % colors.length];
   };
 
-  // Handle optimistic card updates (title, description, color)
-  const handleCardUpdate = (cardId: string, updates: { title?: string; description?: string; color?: string }) => {
+  const handleCardUpdate = useCallback((cardId: string, updates: { title?: string; description?: string; color?: string }) => {
     setBoard((prevBoard: any) => {
       if (!prevBoard) return prevBoard;
 
@@ -126,257 +244,213 @@ export default function BoardPage() {
         columns: prevBoard.columns.map((col: any) => ({
           ...col,
           cards: col.cards.map((card: any) =>
-            card.id === cardId
-              ? { ...card, ...updates }
-              : card
+            card.id === cardId ? { ...card, ...updates } : card
           ),
         })),
       };
     });
-  };
 
-  const findCardAndColumn = (cardId: string) => {
-    for (const col of board.columns) {
-      const cardIndex = col.cards.findIndex((c: any) => c.id === cardId);
-      if (cardIndex !== -1) {
-        return {
-          column: col,
-          cardIndex,
-          card: col.cards[cardIndex],
-        };
-      }
+    if (broadcastChannelRef.current) {
+      broadcastChannelRef.current.send({
+        type: 'broadcast',
+        event: 'update',
+        payload: { cardId, updates }
+      });
+    } else {
     }
-    return null;
-  };
+  }, []);
 
   const handleDragStart = (event: DragStartEvent) => {
-    const cardId = event.active.id as string;
+    const { active } = event;
+    const cardId = active.id as string;
     setActiveId(cardId);
-    setIsDragging(true); // Set dragging flag
+    const card = board?.columns?.flatMap((col: any) => col.cards)?.find((c: any) => c.id === cardId);
+    setActiveCard(card);
 
-    // Store the original board state before any drag operations
-    setOriginalBoard(JSON.parse(JSON.stringify(board)));
-
-    // Find and store the active card for the overlay
-    const result = findCardAndColumn(cardId);
-    if (result) {
-      setActiveCard(result.card);
+    if (broadcastChannelRef.current && user && card) {
+      broadcastChannelRef.current.send({
+        type: 'broadcast',
+        event: 'drag-start',
+        payload: {
+          cardId,
+          userId: user.id,
+          userName: user.email?.split('@')[0] || 'Anonymous',
+          userColor: getUserColor(),
+          card
+        }
+      });
     }
   };
 
-  const handleDragOver = (event: DragOverEvent) => {
-    const { active, over } = event;
-    if (!over) return;
-
-    const activeId = active.id as string;
-    const overId = over.id as string;
-
-    // Find source
-    const activeResult = findCardAndColumn(activeId);
-    if (!activeResult) return;
-
-    // Check if over is a column or a card
-    const overResult = findCardAndColumn(overId);
-    const overColumn = overResult
-      ? overResult.column
-      : board.columns.find((col: any) => col.id === overId);
-
-    if (!overColumn) return;
-
-    // If dragging over different column, update local state for smooth animation
-    if (activeResult.column.id !== overColumn.id) {
-      setBoard((prev: any) => {
-        const newColumns = prev.columns.map((col: any) => {
-          if (col.id === activeResult.column.id) {
-            // Remove from source
-            return {
-              ...col,
-              cards: col.cards.filter((c: any) => c.id !== activeId),
-            };
+  const handleDragMove = (event: DragMoveEvent) => {
+    if (broadcastChannelRef.current && user && activeId) {
+      const { activatorEvent } = event;
+      if (activatorEvent && 'clientX' in activatorEvent && 'clientY' in activatorEvent) {
+        broadcastChannelRef.current.send({
+          type: 'broadcast',
+          event: 'drag-move',
+          payload: {
+            userId: user.id,
+            x: activatorEvent.clientX,
+            y: activatorEvent.clientY
           }
-          if (col.id === overColumn.id) {
-            // Add to destination
-            const newCards = [...col.cards];
-            const insertIndex = overResult ? overResult.cardIndex : newCards.length;
-            newCards.splice(insertIndex, 0, activeResult.card);
-            return {
-              ...col,
-              cards: newCards,
-            };
-          }
-          return col;
         });
-
-        return { ...prev, columns: newColumns };
-      });
-    } else if (overResult) {
-      // Reordering within same column
-      setBoard((prev: any) => {
-        const newColumns = prev.columns.map((col: any) => {
-          if (col.id === activeResult.column.id) {
-            const oldIndex = activeResult.cardIndex;
-            const newIndex = overResult.cardIndex;
-            return {
-              ...col,
-              cards: arrayMove(col.cards, oldIndex, newIndex),
-            };
-          }
-          return col;
-        });
-
-        return { ...prev, columns: newColumns };
-      });
+      }
     }
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
+    
+    const draggedCardId = activeId;
     setActiveId(null);
     setActiveCard(null);
 
-    if (!over || !originalBoard) {
-      setOriginalBoard(null);
-      return;
-    }
-
-    const activeId = active.id as string;
-    const overId = over.id as string;
-
-    // Find source and destination from ORIGINAL board state
-    const findInOriginal = (cardId: string) => {
-      for (const col of originalBoard.columns) {
-        const cardIndex = col.cards.findIndex((c: any) => c.id === cardId);
-        if (cardIndex !== -1) {
-          return { column: col, cardIndex, card: col.cards[cardIndex] };
-        }
-      }
-      return null;
-    };
-
-    const activeResult = findInOriginal(activeId);
-    if (!activeResult) {
-      setOriginalBoard(null);
-      return;
-    }
-
-    // IMPORTANT: Find destination in ORIGINAL board state too for same-column moves
-    const overResult = findInOriginal(overId);
-    
-    // Determine destination column
-    let destColumnId: string;
-    let destIndex: number;
-    
-    if (overResult) {
-      // Dropped on another card
-      destColumnId = overResult.column.id;
-      destIndex = overResult.cardIndex;
-      
-      // If moving within same column and dropping after itself, adjust index
-      if (destColumnId === activeResult.column.id && destIndex > activeResult.cardIndex) {
-        destIndex -= 1;
-      }
-    } else {
-      // Dropped on column (empty area)
-      const overColumn = originalBoard.columns.find((col: any) => col.id === overId);
-      if (!overColumn) {
-        setOriginalBoard(null);
-        return;
-      }
-      destColumnId = overColumn.id;
-      destIndex = overColumn.cards.length;
-      
-      // If dropping in same column, account for removed card
-      if (destColumnId === activeResult.column.id) {
-        destIndex -= 1;
-      }
-    }
-
-    const sourceColumnId = activeResult.column.id;
-    const sourceIndex = activeResult.cardIndex;
-
-    // Only save if position actually changed
-    if (sourceColumnId === destColumnId && sourceIndex === destIndex) {
-      setOriginalBoard(null);
-      return;
-    }
-
-    // Save to database - don't reload, keep the optimistic update
-    try {
-      await moveCard({
-        cardId: activeId,
-        sourceColumnId,
-        destColumnId,
-        sourceIndex,
-        destIndex,
-        projectId,
+    if (broadcastChannelRef.current && user && draggedCardId) {
+      broadcastChannelRef.current.send({
+        type: 'broadcast',
+        event: 'drag-end',
+        payload: { userId: user.id, cardId: draggedCardId }
       });
-      setOriginalBoard(null);
-    } catch (error) {
-      console.error('Failed to move card:', error);
-      // On error, revert to original state
-      setBoard(originalBoard);
-      setOriginalBoard(null);
-    } finally {
-      setIsDragging(false); // Clear dragging flag
     }
-  };
 
-  const handleDragCancel = () => {
-    setActiveId(null);
-    setActiveCard(null);
-    setIsDragging(false); // Clear dragging flag
-    // Revert to original state
-    if (originalBoard) {
-      setBoard(originalBoard);
-      setOriginalBoard(null);
+    if (!over || !board) return;
+
+    const activeCardId = active.id as string;
+    const overColumnId = over.id as string;
+
+    const activeColumn = board.columns.find((col: any) =>
+      col.cards.some((card: any) => card.id === activeCardId)
+    );
+
+    if (!activeColumn) return;
+
+    const overColumn = board.columns.find((col: any) => col.id === overColumnId) ||
+      board.columns.find((col: any) => col.cards.some((card: any) => card.id === overColumnId));
+
+    if (!overColumn) return;
+
+    const activeCardIndex = activeColumn.cards.findIndex((c: any) => c.id === activeCardId);
+    const activeCardData = activeColumn.cards[activeCardIndex];
+
+    if (activeColumn.id === overColumn.id) {
+      const overCardIndex = overColumn.cards.findIndex((c: any) => c.id === overColumnId);
+      if (overCardIndex === -1) return;
+
+      const newCards = arrayMove(activeColumn.cards, activeCardIndex, overCardIndex);
+
+      setBoard({
+        ...board,
+        columns: board.columns.map((col: any) =>
+          col.id === activeColumn.id ? { ...col, cards: newCards } : col
+        ),
+      });
+
+      if (broadcastChannelRef.current) {
+        broadcastChannelRef.current.send({
+          type: 'broadcast',
+          event: 'move',
+          payload: { 
+            cardId: activeCardId,
+            sourceColumnId: activeColumn.id,
+            destColumnId: overColumn.id,
+            destIndex: overCardIndex
+          }
+        });
+      }
+
+      moveCard({
+        cardId: activeCardId,
+        sourceColumnId: activeColumn.id,
+        destColumnId: overColumn.id,
+        sourceIndex: activeCardIndex,
+        destIndex: overCardIndex,
+        projectId,
+      }).catch(err => {});
+    } else {
+      const newActiveCards = activeColumn.cards.filter((c: any) => c.id !== activeCardId);
+      const overCardIndex = overColumn.cards.findIndex((c: any) => c.id === overColumnId);
+      const insertIndex = overCardIndex === -1 ? overColumn.cards.length : overCardIndex;
+
+      const newOverCards = [...overColumn.cards];
+      newOverCards.splice(insertIndex, 0, { ...activeCardData, column_id: overColumn.id });
+
+      setBoard({
+        ...board,
+        columns: board.columns.map((col: any) => {
+          if (col.id === activeColumn.id) return { ...col, cards: newActiveCards };
+          if (col.id === overColumn.id) return { ...col, cards: newOverCards };
+          return col;
+        }),
+      });
+
+      if (broadcastChannelRef.current) {
+        broadcastChannelRef.current.send({
+          type: 'broadcast',
+          event: 'move',
+          payload: { 
+            cardId: activeCardId,
+            sourceColumnId: activeColumn.id,
+            destColumnId: overColumn.id,
+            destIndex: insertIndex
+          }
+        });
+      }
+
+      moveCard({
+        cardId: activeCardId,
+        sourceColumnId: activeColumn.id,
+        destColumnId: overColumn.id,
+        sourceIndex: activeCardIndex,
+        destIndex: insertIndex,
+        projectId,
+      }).catch(err => {});
     }
   };
 
   if (loading) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <p className="text-gray-500">Loading board...</p>
+      <div className="flex items-center justify-center h-screen">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
       </div>
     );
   }
 
-  if (!board) {
+  if (!board || !board.columns) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <p className="text-gray-500">Board not found</p>
+      <div className="flex items-center justify-center h-screen">
+        <p className="text-gray-500">No board found</p>
       </div>
     );
   }
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="border-b p-3 sm:p-4 md:p-4 bg-white">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-bold">{board.name}</h1>
-            {syncing && (
-              <span className="text-sm text-blue-600 animate-pulse">
-                🔄 Syncing...
-              </span>
-            )}
-          </div>
-          {board.id && <ActiveUsers roomId={board.id} roomType="board" />}
-        </div>
-        <p className="text-xs sm:text-sm text-gray-600">
-          Drag cards to reorder or move between columns
-        </p>
+    <div className="h-screen flex flex-col overflow-hidden bg-linear-to-br from-blue-50 via-white to-purple-50">
+      {user && board && (
+        <CursorPresence
+          roomId={board.id}
+          roomType="board"
+          currentUser={{
+            id: user.id,
+            name: user.email?.split('@')[0] || 'Anonymous',
+            color: getUserColor()
+          }}
+        />
+      )}
+
+      <div className="flex-none px-4 py-3 border-b bg-white/80 backdrop-blur-sm flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Kanban Board</h2>
+        <ActiveUsers roomId={board.id} roomType="board" />
       </div>
 
-      <div className="flex-1 p-3 sm:p-4 md:p-6 overflow-x-auto">
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCorners}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragEnd={handleDragEnd}
-          onDragCancel={handleDragCancel}
-        >
-          <div className="flex gap-3 sm:gap-4 md:gap-6 h-full min-w-max">
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragMove={handleDragMove}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="flex-1 overflow-x-auto">
+          <div className="flex gap-4 p-4 h-full">
             {board.columns.map((column: any) => (
               <KanbanColumn
                 key={column.id}
@@ -391,32 +465,53 @@ export default function BoardPage() {
                   })
                 }
                 projectId={projectId}
-                onRefresh={refreshBoard}
+                onRefresh={loadBoard}
                 onUpdate={handleCardUpdate}
               />
             ))}
           </div>
+        </div>
 
-          <DragOverlay>
-            {activeCard ? (
-              <div className={`${activeCard.color} border rounded-lg p-3 shadow-xl w-64 sm:w-72 md:w-80 opacity-90`}>
-                <h4 className="font-medium text-sm mb-1 text-gray-800">{activeCard.title}</h4>
-                {activeCard.description && (
-                  <p className="text-xs text-gray-600 line-clamp-3">{activeCard.description}</p>
-                )}
-              </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
-      </div>
+        <DragOverlay>
+          {activeId && activeCard ? (
+            <div className="rotate-3 opacity-80">
+              <KanbanCard card={activeCard} projectId={projectId} />
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+
+      {Array.from(remoteDragStates.values()).map(({ userId, userName, userColor, card, cursorX, cursorY }) => (
+        <div
+          key={userId}
+          className="fixed pointer-events-none z-50 transition-transform duration-75"
+          style={{
+            left: cursorX,
+            top: cursorY,
+            transform: 'translate(-50%, -50%) rotate(3deg)',
+          }}
+        >
+          <div className="relative opacity-70">
+            <KanbanCard card={card} projectId={projectId} />
+            <div
+              className="absolute -top-6 left-0 px-2 py-1 rounded text-xs font-medium text-white whitespace-nowrap shadow-lg"
+              style={{ backgroundColor: userColor }}
+            >
+              {userName}
+            </div>
+          </div>
+        </div>
+      ))}
 
       <AddCardDialog
         open={addCardDialog.open}
-        onOpenChange={(open) => setAddCardDialog({ ...addCardDialog, open })}
         columnId={addCardDialog.columnId}
         columnTitle={addCardDialog.columnTitle}
         projectId={projectId}
-        onRefresh={refreshBoard}
+        onOpenChange={(open) =>
+          setAddCardDialog({ ...addCardDialog, open })
+        }
+        onRefresh={loadBoard}
       />
     </div>
   );

@@ -59,39 +59,39 @@ export function KanbanCard({ card, projectId, onRefresh, onUpdate }: KanbanCardP
 
   const currentColor = CARD_COLORS.find(c => c.class === card.color) || CARD_COLORS[0];
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (title.trim()) {
       const updates = {
         title: title.trim(),
         description: description.trim(),
       };
       
-      // Optimistic update - update UI immediately
+      // INSTANT: Update UI immediately + broadcast to others
       if (onUpdate) {
         onUpdate(card.id, updates);
       }
       
-      // Save to database in the background
-      await updateCard(card.id, {
+      // Save to database in background (NO await - don't block UI!)
+      updateCard(card.id, {
         ...updates,
         projectId,
-      });
+      }).catch(err => console.error('Background save failed:', err));
       
       setIsEditing(false);
     }
   };
 
-  const handleColorChange = async (color: string) => {
-    // Optimistic update - update UI immediately
+  const handleColorChange = (color: string) => {
+    // INSTANT: Update UI immediately + broadcast to others
     if (onUpdate) {
       onUpdate(card.id, { color });
     }
     
-    // Save to database in the background
-    await updateCard(card.id, {
+    // Save to database in background (NO await - don't block UI!)
+    updateCard(card.id, {
       color,
       projectId,
-    });
+    }).catch(err => console.error('Background save failed:', err));
     
     setShowColorPicker(false);
   };

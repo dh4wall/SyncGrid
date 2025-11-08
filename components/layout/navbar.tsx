@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Bell, Search, User, LogOut, Settings } from 'lucide-react';
+import { Search, User, LogOut, Settings } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { NotificationBell } from './notification-bell';
 
 export default function Navbar() {
   const router = useRouter();
@@ -46,7 +47,7 @@ export default function Navbar() {
     <nav className="h-14 md:h-16 border-b bg-white flex items-center px-3 sm:px-4 md:px-6">
       {/* Logo */}
       <Link href="/dashboard" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-        <div className="w-7 h-7 md:w-8 md:h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg" />
+        <div className="w-7 h-7 md:w-8 md:h-8 bg-linear-to-br from-blue-600 to-purple-600 rounded-lg" />
         <span className="text-lg md:text-xl font-bold hidden sm:inline">SyncGrid</span>
       </Link>
 
@@ -64,16 +65,14 @@ export default function Navbar() {
 
       {/* Right Side Actions */}
       <div className="flex items-center gap-2 md:gap-3">
-        <button className="p-1.5 md:p-2 hover:bg-gray-100 rounded-lg relative">
-          <Bell className="w-4 h-4 md:w-5 md:h-5" />
-          <span className="absolute top-0.5 right-0.5 md:top-1 md:right-1 w-1.5 h-1.5 md:w-2 md:h-2 bg-red-500 rounded-full" />
-        </button>
+        {/* Notification Bell */}
+        <NotificationBell />
 
         {/* Profile Dropdown */}
         <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setShowDropdown(!showDropdown)}
-            className="w-7 h-7 md:w-8 md:h-8 bg-gradient-to-br from-purple-400 to-pink-400 rounded-full flex items-center justify-center text-white font-semibold text-sm hover:opacity-80 transition-opacity"
+            className="w-7 h-7 md:w-8 md:h-8 bg-linear-to-br from-purple-400 to-pink-400 rounded-full flex items-center justify-center text-white font-semibold text-sm hover:opacity-80 transition-opacity"
           >
             {userName.charAt(0).toUpperCase()}
           </button>

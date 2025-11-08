@@ -17,14 +17,14 @@ interface AddCardDialogProps {
 }
 
 const CARD_COLORS = [
-  { name: 'White', class: 'bg-white', border: 'border-gray-200' },
-  { name: 'Red', class: 'bg-red-50', border: 'border-red-200' },
-  { name: 'Orange', class: 'bg-orange-50', border: 'border-orange-200' },
-  { name: 'Yellow', class: 'bg-yellow-50', border: 'border-yellow-200' },
-  { name: 'Green', class: 'bg-green-50', border: 'border-green-200' },
-  { name: 'Blue', class: 'bg-blue-50', border: 'border-blue-200' },
-  { name: 'Purple', class: 'bg-purple-50', border: 'border-purple-200' },
-  { name: 'Pink', class: 'bg-pink-50', border: 'border-pink-200' },
+  { name: 'White', class: 'bg-white', border: 'border-gray-300' },
+  { name: 'Red', class: 'bg-red-200', border: 'border-red-400' },
+  { name: 'Orange', class: 'bg-orange-200', border: 'border-orange-400' },
+  { name: 'Yellow', class: 'bg-yellow-200', border: 'border-yellow-400' },
+  { name: 'Green', class: 'bg-green-200', border: 'border-green-400' },
+  { name: 'Blue', class: 'bg-blue-200', border: 'border-blue-400' },
+  { name: 'Purple', class: 'bg-purple-200', border: 'border-purple-400' },
+  { name: 'Pink', class: 'bg-pink-200', border: 'border-pink-400' },
 ];
 
 export function AddCardDialog({

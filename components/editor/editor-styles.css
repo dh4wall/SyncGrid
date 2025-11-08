@@ -326,3 +326,29 @@
   margin: 0.5rem;
   vertical-align: top;
 }
+
+/* Mention styles */
+.ProseMirror .mention {
+  background-color: rgba(59, 130, 246, 0.1);
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.25rem;
+  color: rgb(37, 99, 235);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.ProseMirror .mention:hover {
+  background-color: rgba(59, 130, 246, 0.2);
+}
+
+/* Mention list dropdown */
+.mention-list {
+  min-width: 250px;
+  max-width: 350px;
+  z-index: 9999;
+}
+
+.mention-item {
+  cursor: pointer;
+}

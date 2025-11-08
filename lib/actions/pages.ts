@@ -103,41 +103,36 @@ export async function updatePage(data: {
     throw new Error('Unauthorized');
   }
 
-  // Get current page
-  const { data: currentPage } = await supabase
-    .from('pages')
-    .select('*')
-    .eq('id', data.pageId)
-    .single();
-
-  if (!currentPage) {
-    throw new Error('Page not found');
-  }
-
   const updateData: any = {};
   if (data.title !== undefined) updateData.title = data.title;
   if (data.content !== undefined) updateData.content = data.content;
 
-  // Check if we should create a new version
-  // Create version if content changed significantly or createVersion is explicitly true
-  const shouldCreateVersion = data.createVersion || 
-    (data.content && data.content !== currentPage.content && data.content.length > 0);
+  // Only create version if EXPLICITLY requested (manual saves)
+  if (data.createVersion) {
+    // Get current version number
+    const { data: currentPage } = await supabase
+      .from('pages')
+      .select('current_version, title, content')
+      .eq('id', data.pageId)
+      .single();
 
-  if (shouldCreateVersion) {
-    updateData.current_version = currentPage.current_version + 1;
+    if (currentPage) {
+      const newVersionNumber = currentPage.current_version + 1;
+      updateData.current_version = newVersionNumber;
 
-    // Create new version
-    await supabase.from('page_versions').insert({
-      page_id: data.pageId,
-      version_number: currentPage.current_version + 1,
-      title: data.title || currentPage.title,
-      content: data.content || currentPage.content,
-      created_by: user.id,
-      change_summary: data.changeSummary || 'Content updated',
-    });
+      // Create new version
+      await supabase.from('page_versions').insert({
+        page_id: data.pageId,
+        version_number: newVersionNumber,
+        title: data.title || currentPage.title,
+        content: data.content || currentPage.content,
+        created_by: user.id,
+        change_summary: data.changeSummary || 'Content updated',
+      });
+    }
   }
 
-  // Update page
+  // FAST UPDATE - no extra queries for auto-saves
   const { error } = await supabase
     .from('pages')
     .update(updateData)
