@@ -1,36 +1,139 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+<!-- PROJECT LOGO -->
 
-## Getting Started
+<h1 align="center">SyncGrid</h1>
 
-First, run the development server:
+<p align="center">
+  <b>Real-time collaborative workspace platform</b><br>
+  <i>Kanban boards, collaborative editing, notifications, and more.</i>
+</p>
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+<p align="center">
+  <a href="#tech-stack">Tech Stack</a> •
+  <a href="#features">Features</a> •
+  <a href="#getting-started">Getting Started</a> •
+  <a href="#contributing">Contributing</a> •
+  <a href="#license">License</a>
+</p>
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+# SyncGrid
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+SyncGrid is a real-time collaborative workspace platform built with Next.js, Supabase, Liveblocks, and a modern React/TypeScript stack. It features Kanban boards, collaborative editing, notifications, and more.
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## 🚀 Tech Stack
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- **Next.js**: React framework for server-side rendering, routing, and API routes.
+- **TypeScript**: Type-safe JavaScript for robust code.
+- **Tailwind CSS**: Utility-first CSS framework for rapid UI development.
+- **Supabase**: Backend-as-a-Service for authentication, database, and real-time features.
+- **Dnd-kit**: Drag-and-drop for Kanban boards.
+- **Tiptap**: Rich text collaborative editor.
+- **Zustand**: State management for React.
+- **Lucide-react**: Icon library.
+- **React Hot Toast**: Toast notifications.
+- **Radix UI**: Accessible UI primitives.
+- **Framer Motion**: Animations.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## ✨ Features
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- 🔐 User authentication (sign up, login, email verification)
+- 🗂️ Real-time Kanban board with drag-and-drop
+- 🤝 Collaborative editing with presence indicators
+- 📁 Project and board management
+- 🔔 Notification system
+- 📱 Responsive, modern UI
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+## 🛠️ Getting Started
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/yourusername/syncgrid.git
+   cd syncgrid
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   npm install
+   # or
+   yarn install
+   ```
+
+3. **Set up environment variables:**
+   - Copy `.env.example` to `.env.local` and fill in your Supabase credentials and other required values.
+
+4. **Run the development server:**
+   ```bash
+   npm run dev
+   # or
+   yarn dev
+   ```
+
+5. **Open [http://localhost:3000](http://localhost:3000) in your browser.**
+
+---
+
+## 📁 Project Structure
+
+- `app/` — Next.js app directory (routes, pages)
+- `components/` — Reusable UI and board components
+- `lib/` — Hooks, utilities, and API clients
+- `types/` — TypeScript types
+
+---
+
+## 🗄️ Database
+
+- Uses Supabase (PostgreSQL) for data storage, authentication, and real-time features.
+- SQL scripts for schema and RLS policies are in the `sql/` directory.
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! To get started:
+
+1. **Fork the repository** and create your branch:
+   ```bash
+   git checkout -b feature/your-feature
+   ```
+
+2. **Make your changes** and commit:
+   ```bash
+   git commit -m "Add your feature"
+   ```
+
+3. **Push to your fork** and open a Pull Request:
+   ```bash
+   git push origin feature/your-feature
+   ```
+
+4. **Describe your changes** in the PR and link any related issues.
+
+### Guidelines
+
+- Use clear, descriptive commit messages.
+- Write type-safe, clean, and well-documented code.
+- Follow the existing code style (TypeScript, Tailwind, etc.).
+- Add tests or documentation as needed.
+- For major changes, open an issue first to discuss your proposal.
+
+---
+
+## 📜 License
+
+[MIT](LICENSE)
+
+---
+
+<p align="center">
+  <img src="public/next.svg" alt="Next.js" width="40" />
+  <img src="public/vercel.svg" alt="Vercel" width="40" />
+  <img src="public/window.svg" alt="UI" width="40" />
+</p>
