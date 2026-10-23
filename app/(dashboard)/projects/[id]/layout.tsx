@@ -1,5 +1,4 @@
 import { getProject } from '@/lib/actions/projects';
-import ProjectSidebar from '@/components/layout/project-sidebar';
 import Navbar from '@/components/layout/navbar';
 import { notFound } from 'next/navigation';
 
@@ -18,14 +17,11 @@ export default async function ProjectLayout({
   }
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-screen flex flex-col overflow-hidden">
       <Navbar />
-      <div className="flex-1 flex overflow-hidden">
-        <ProjectSidebar project={project} />
-        <main className="flex-1 overflow-y-auto bg-gray-50">
-          {children}
-        </main>
-      </div>
+      <main className="flex-1 overflow-hidden">
+        {children}
+      </main>
     </div>
   );
-}
+}

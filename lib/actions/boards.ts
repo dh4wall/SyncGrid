@@ -119,7 +119,6 @@ export async function createCard(data: {
     throw new Error(error.message);
   }
 
-  // Liveblocks handles real-time broadcasting on the client side
   revalidatePath(`/projects/${data.projectId}/board`);
   return card;
 }
@@ -158,9 +157,6 @@ export async function updateCard(cardId: string, data: {
     throw new Error(error.message);
   }
 
-  // Broadcast the change to all connected clients
-  const boardId = (cardData as any)?.columns?.board_id;
-
   // Only revalidate for position/column changes (drag operations)
   // For title/description/color changes, use optimistic updates on the client
   if (data.columnId !== undefined || data.position !== undefined) {
@@ -188,10 +184,71 @@ export async function deleteCard(cardId: string, projectId: string) {
     throw new Error(error.message);
   }
 
-  // Broadcast the change to all connected clients
-  const boardId = (cardData as any)?.columns?.board_id;
-
   revalidatePath(`/projects/${projectId}/board`);
+}
+
+export async function createColumn(data: {
+  boardId: string;
+  title: string;
+  projectId: string;
+}) {
+  const supabase = await createServerSupabaseClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Unauthorized');
+
+  // Get current max position
+  const { data: cols } = await supabase
+    .from('columns')
+    .select('position')
+    .eq('board_id', data.boardId)
+    .order('position', { ascending: false })
+    .limit(1);
+
+  const nextPosition = cols && cols.length > 0 ? cols[0].position + 1 : 0;
+
+  const { data: column, error } = await supabase
+    .from('columns')
+    .insert({
+      board_id: data.boardId,
+      title: data.title.trim(),
+      position: nextPosition,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Create column error:', error);
+    throw new Error(error.message);
+  }
+
+  revalidatePath(`/projects/${data.projectId}/board`);
+  return column;
+}
+
+export async function deleteColumn(data: {
+  columnId: string;
+  projectId: string;
+}) {
+  const supabase = await createServerSupabaseClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Unauthorized');
+
+  // Delete all cards in the column first (cascade might handle this but be explicit)
+  await supabase.from('cards').delete().eq('column_id', data.columnId);
+
+  const { error } = await supabase
+    .from('columns')
+    .delete()
+    .eq('id', data.columnId);
+
+  if (error) {
+    console.error('Delete column error:', error);
+    throw new Error(error.message);
+  }
+
+  revalidatePath(`/projects/${data.projectId}/board`);
 }
 
 export async function moveCard(data: {

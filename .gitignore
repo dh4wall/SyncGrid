@@ -45,3 +45,6 @@ next-env.d.ts
 
 # sql queries
 /sql/
+
+# credentials
+client_secret*.json

@@ -10,6 +10,7 @@ import { Users, Crown, Shield, Edit, Eye, MoreVertical, Trash2 } from 'lucide-re
 interface ProjectMembersProps {
   projectId: string;
   isOwner: boolean;
+  compact?: boolean;
 }
 
 const ROLE_ICONS = {
@@ -26,7 +27,7 @@ const ROLE_COLORS = {
   viewer: 'text-gray-600 bg-gray-50',
 };
 
-export function ProjectMembers({ projectId, isOwner }: ProjectMembersProps) {
+export function ProjectMembers({ projectId, isOwner, compact }: ProjectMembersProps) {
   const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -76,22 +77,24 @@ export function ProjectMembers({ projectId, isOwner }: ProjectMembersProps) {
   const pendingMembers = members.filter(m => m.invitation_status === 'pending');
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold">Team Members</h2>
-          <p className="text-sm text-gray-600">
-            Manage who has access to this project
-          </p>
+    <div className="space-y-4">
+      {/* Header — hidden in compact (settings) mode */}
+      {!compact && (
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-semibold">Team Members</h2>
+            <p className="text-sm text-gray-600">
+              Manage who has access to this project
+            </p>
+          </div>
+          {isOwner && (
+            <Button onClick={() => setInviteOpen(true)}>
+              <Users className="w-4 h-4 mr-2" />
+              Invite Member
+            </Button>
+          )}
         </div>
-        {isOwner && (
-          <Button onClick={() => setInviteOpen(true)}>
-            <Users className="w-4 h-4 mr-2" />
-            Invite Member
-          </Button>
-        )}
-      </div>
+      )}
 
       {/* Active Members */}
       <Card>

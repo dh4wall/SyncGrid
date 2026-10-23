@@ -15,14 +15,17 @@ import { arrayMove } from '@dnd-kit/sortable';
 import { KanbanColumn } from '@/components/board/kanban-column';
 import { KanbanCard } from '@/components/board/kanban-card';
 import { AddCardDialog } from '@/components/board/add-card-dialog';
+import { AddColumnButton } from '@/components/board/add-column-button';
 import { ActiveUsers } from '@/components/board/active-users';
 import { CursorPresence } from '@/components/presence/cursor-presence';
 import { moveCard } from '@/lib/actions/boards';
 import { getBoardClient } from '@/lib/queries/client';
+import { getProject } from '@/lib/actions/projects';
 import { createClient } from '@/lib/supabase/client';
 import { useParams } from 'next/navigation';
 import { useUser } from '@/lib/hooks';
 import { Loader2 } from 'lucide-react';
+import ProjectDock from '@/components/layout/project-dock';
 
 
 export default function BoardPage() {
@@ -31,9 +34,11 @@ export default function BoardPage() {
   const { user } = useUser();
 
   const [board, setBoard] = useState<any>(null);
+  const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeCard, setActiveCard] = useState<any>(null);
+  const [broadcastChannel, setBroadcastChannel] = useState<any>(null); // state so children re-render when ready
   const [remoteDragStates, setRemoteDragStates] = useState<Map<string, {
     cardId: string;
     userId: string;
@@ -44,7 +49,6 @@ export default function BoardPage() {
     cursorY: number;
   }>>(new Map());
   const broadcastChannelRef = useRef<any>(null);
-  const boardIdRef = useRef<string | null>(null); 
   const isChannelSetupRef = useRef(false); 
   const [addCardDialog, setAddCardDialog] = useState<{
     open: boolean;
@@ -60,27 +64,27 @@ export default function BoardPage() {
 
   useEffect(() => {
     const initBoard = async () => {
-      const data = await getBoardClient(projectId);
+      const [data, proj] = await Promise.all([
+        getBoardClient(projectId),
+        getProject(projectId),
+      ]);
       setBoard(data);
+      setProject(proj);
       setLoading(false);
-      
-      if (data?.id) {
-        boardIdRef.current = data.id;
-      }
     };
-    
     initBoard();
   }, [projectId]);
 
   
+  // Depend on board?.id (state) not a ref — so this fires when board loads
   useEffect(() => {
-    if (!boardIdRef.current || isChannelSetupRef.current) return;
+    if (!board?.id || isChannelSetupRef.current) return;
 
     const supabase = createClient();
 
     isChannelSetupRef.current = true;
 
-    const broadcastCh = supabase.channel(`board-broadcast-${boardIdRef.current}`, {
+    const broadcastCh = supabase.channel(`board-broadcast-${board.id}`, {
       config: { 
         broadcast: { self: false },
         presence: { key: '' }
@@ -120,6 +124,50 @@ export default function BoardPage() {
           const newMap = new Map(prev);
           newMap.delete(userId);
           return newMap;
+        });
+      })
+      .on('broadcast', { event: 'card-create' }, (payload: any) => {
+        const { card } = payload.payload;
+        setBoard((prevBoard: any) => {
+          if (!prevBoard) return prevBoard;
+          return {
+            ...prevBoard,
+            columns: prevBoard.columns.map((col: any) =>
+              col.id === card.column_id
+                ? { ...col, cards: [...col.cards, card] }
+                : col
+            ),
+          };
+        });
+      })
+      .on('broadcast', { event: 'card-delete' }, (payload: any) => {
+        const { cardId } = payload.payload;
+        setBoard((prevBoard: any) => {
+          if (!prevBoard) return prevBoard;
+          return {
+            ...prevBoard,
+            columns: prevBoard.columns.map((col: any) => ({
+              ...col,
+              cards: col.cards.filter((c: any) => c.id !== cardId),
+            })),
+          };
+        });
+      })
+      .on('broadcast', { event: 'column-create' }, (payload: any) => {
+        const { column } = payload.payload;
+        setBoard((prevBoard: any) => {
+          if (!prevBoard) return prevBoard;
+          return { ...prevBoard, columns: [...prevBoard.columns, column] };
+        });
+      })
+      .on('broadcast', { event: 'column-delete' }, (payload: any) => {
+        const { columnId } = payload.payload;
+        setBoard((prevBoard: any) => {
+          if (!prevBoard) return prevBoard;
+          return {
+            ...prevBoard,
+            columns: prevBoard.columns.filter((col: any) => col.id !== columnId),
+          };
         });
       })
       .on('broadcast', { event: 'move' }, (payload: any) => {
@@ -179,6 +227,10 @@ export default function BoardPage() {
         });
       })
       .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          broadcastChannelRef.current = broadcastCh;
+          setBroadcastChannel(broadcastCh); // trigger re-render so children get the channel
+        }
       });
 
     broadcastChannelRef.current = broadcastCh;
@@ -207,6 +259,7 @@ export default function BoardPage() {
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      setBroadcastChannel(null);
       if (user?.id) {
         broadcastCh.send({
           type: 'broadcast',
@@ -219,14 +272,31 @@ export default function BoardPage() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       
       isChannelSetupRef.current = false;
+      setBroadcastChannel(null);
       supabase.removeChannel(broadcastCh);
     };
-  }, [boardIdRef.current, user?.id]); 
+  }, [board?.id, user?.id]); 
 
   const loadBoard = async () => {
     const data = await getBoardClient(projectId);
     setBoard(data);
   };
+
+  // Optimistic column create — called by AddColumnButton
+  const handleColumnCreated = useCallback((column: any) => {
+    setBoard((prev: any) => {
+      if (!prev) return prev;
+      return { ...prev, columns: [...prev.columns, column] };
+    });
+  }, []);
+
+  // Optimistic column delete — called by KanbanColumn
+  const handleColumnDeleted = useCallback((columnId: string) => {
+    setBoard((prev: any) => {
+      if (!prev) return prev;
+      return { ...prev, columns: prev.columns.filter((col: any) => col.id !== columnId) };
+    });
+  }, []);
 
   const getUserColor = () => {
     if (!user?.id) return '#3B82F6';
@@ -425,7 +495,7 @@ export default function BoardPage() {
   }
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-linear-to-br from-blue-50 via-white to-purple-50">
+    <div className="h-full flex flex-col overflow-hidden bg-[#faf8ff]">
       {user && board && (
         <CursorPresence
           roomId={board.id}
@@ -438,8 +508,18 @@ export default function BoardPage() {
         />
       )}
 
-      <div className="flex-none px-4 py-3 border-b bg-white/80 backdrop-blur-sm flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Kanban Board</h2>
+      {/* Board subheader */}
+      <div className="flex-none px-5 sm:px-6 h-12 border-b border-[#c3c6d7]/30 bg-white/90 backdrop-blur-md flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 text-xs text-[#434655]" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+            <span className="text-[#737686]">{project?.name || 'Project'}</span>
+            <span className="text-[#c3c6d7]">/</span>
+            <span className="text-[#131b2e] font-semibold flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[14px] text-[#004ac6]" style={{ fontVariationSettings: "'FILL' 1" }}>view_kanban</span>
+              Kanban
+            </span>
+          </div>
+        </div>
         <ActiveUsers roomId={board.id} roomType="board" />
       </div>
 
@@ -449,8 +529,8 @@ export default function BoardPage() {
         onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex-1 overflow-x-auto">
-          <div className="flex gap-4 p-4 h-full">
+        <div className="flex-1 overflow-x-auto sg-scrollbar-h pb-28">
+          <div className="flex gap-4 p-4 h-full min-h-0">
             {board.columns.map((column: any) => (
               <KanbanColumn
                 key={column.id}
@@ -467,8 +547,16 @@ export default function BoardPage() {
                 projectId={projectId}
                 onRefresh={loadBoard}
                 onUpdate={handleCardUpdate}
+                broadcastChannel={broadcastChannel}
+                onDelete={handleColumnDeleted}
               />
             ))}
+            <AddColumnButton
+              boardId={board.id}
+              projectId={projectId}
+              broadcastChannel={broadcastChannel}
+              onColumnCreated={handleColumnCreated}
+            />
           </div>
         </div>
 
@@ -512,7 +600,11 @@ export default function BoardPage() {
           setAddCardDialog({ ...addCardDialog, open })
         }
         onRefresh={loadBoard}
+        broadcastChannel={broadcastChannel}
       />
+
+      {/* Project Dock */}
+      {project && <ProjectDock project={project} />}
     </div>
   );
 }

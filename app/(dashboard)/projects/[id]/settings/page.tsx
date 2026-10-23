@@ -1,7 +1,8 @@
 import { getProject } from '@/lib/actions/projects';
-import { ProjectMembers } from '@/components/project/project-members';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { notFound } from 'next/navigation';
+import ProjectDock from '@/components/layout/project-dock';
+import { ProjectSettingsClient } from '@/components/project/project-settings-client';
 
 export default async function SettingsPage({
   params,
@@ -15,19 +16,17 @@ export default async function SettingsPage({
     notFound();
   }
 
-  // Check if current user is the owner
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
   const isOwner = user?.id === project.created_by;
 
   return (
-    <div className="p-4 sm:p-6 md:p-8 max-w-4xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-2xl sm:text-3xl font-bold mb-2">Project Settings</h1>
-        <p className="text-gray-600">Manage your project settings and team members</p>
+    <div className="h-full flex flex-col overflow-hidden bg-[#faf8ff]">
+      <div className="flex-1 overflow-y-auto sg-scrollbar pb-28">
+        <ProjectSettingsClient project={project} isOwner={isOwner} />
       </div>
-
-      <ProjectMembers projectId={resolvedParams.id} isOwner={isOwner} />
+      <ProjectDock project={project} />
     </div>
   );
 }
+

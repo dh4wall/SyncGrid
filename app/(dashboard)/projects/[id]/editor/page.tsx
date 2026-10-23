@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { AdvancedEditor } from '@/components/editor/advanced-editor';
 import { VersionHistory } from '@/components/editor/version-history';
 import { ActiveUsers } from '@/components/board/active-users';
@@ -9,15 +9,16 @@ import { CursorPresence } from '@/components/presence/cursor-presence';
 import { getPages, updatePage, createPage } from '@/lib/actions/pages';
 import { getPageClient } from '@/lib/queries/client';
 import { Button } from '@/components/ui/button';
-import { Plus, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useUser } from '@/lib/hooks/use-user';
-import { cn } from '@/lib/utils';
 import { extractMentionedUserIds } from '@/lib/utils/extractMentions';
-import { createMentionNotification } from '@/lib/actions/notifications';
+import { getProject } from '@/lib/actions/projects';
+import ProjectDock from '@/components/layout/project-dock';
 
 export default function EditorPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
+  const targetPageId = searchParams.get('pageId');
   const projectId = params.id as string;
   const { user } = useUser();
 
@@ -26,34 +27,22 @@ export default function EditorPage() {
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [remoteUsers, setRemoteUsers] = useState<any[]>([]); // Track other users typing
-  const [remoteCursors, setRemoteCursors] = useState<Map<string, { position: number; user: any }>>(new Map());
+  const [project, setProject] = useState<any>(null);
+  const [remoteUsers, setRemoteUsers] = useState<any[]>([]);
   const saveTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const lastSaveTimestampRef = useRef<number>(0);
   const ignoreNextUpdateRef = useRef(false);
   const editorChannelRef = useRef<any>(null);
-  const sessionIdRef = useRef<string>(crypto.randomUUID()); // Unique session ID
-  const isReceivingRemoteUpdate = useRef(false); // Flag for remote updates
+  const sessionIdRef = useRef<string>(crypto.randomUUID());
+  const isReceivingRemoteUpdate = useRef(false);
   const mentionedUserIdsRef = useRef<string[]>([]);
 
-  // Auto-collapse sidebar on small screens (< 1024px = lg breakpoint)
   useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth < 1024) { // lg breakpoint
-        setIsSidebarCollapsed(true);
-      }
+    const loadProject = async () => {
+      const p = await getProject(projectId);
+      setProject(p);
     };
-    
-    // Check on mount
-    handleResize();
-    
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  useEffect(() => {
+    loadProject();
     loadPages();
   }, [projectId]);
 
@@ -63,21 +52,14 @@ export default function EditorPage() {
 
     const supabase = createClient();
 
-    // BROADCAST ONLY for instant updates
     const broadcastChannel = supabase.channel(`page-presence-${currentPage.id}`, {
       config: { broadcast: { self: false } }
     });
 
     broadcastChannel
       .on('broadcast', { event: 'content' }, (payload: any) => {
-        // Ignore own broadcasts (extra safety)
-        if (payload.payload.sessionId === sessionIdRef.current) {
-          return;
-        }
-        
-        // INSTANT UPDATE - other user typed
+        if (payload.payload.sessionId === sessionIdRef.current) return;
         if (payload.payload.content !== undefined) {
-          // Set flag to prevent re-broadcasting
           isReceivingRemoteUpdate.current = true;
           setContent(payload.payload.content);
         }
@@ -91,11 +73,20 @@ export default function EditorPage() {
     };
   }, [currentPage?.id]);
 
+  useEffect(() => {
+    if (targetPageId && targetPageId !== currentPage?.id) {
+      loadPage(targetPageId);
+    }
+  }, [targetPageId]);
+
   const loadPages = async () => {
     const data = await getPages(projectId);
     setPages(data);
     if (data.length > 0 && !currentPage) {
-      loadPage(data[0].id);
+      const pageToLoad = targetPageId 
+        ? (data.find((p) => p.id === targetPageId)?.id || data[0].id)
+        : data[0].id;
+      loadPage(pageToLoad);
     } else {
       setLoading(false);
     }
@@ -112,9 +103,8 @@ export default function EditorPage() {
   };
 
   const handleContentChange = useCallback(async (newContent: string) => {
-    // Skip if this change is from a remote update
     if (isReceivingRemoteUpdate.current) {
-      isReceivingRemoteUpdate.current = false; // Reset flag
+      isReceivingRemoteUpdate.current = false;
       return;
     }
     setContent(newContent);
@@ -122,23 +112,18 @@ export default function EditorPage() {
       editorChannelRef.current.send({
         type: 'broadcast',
         event: 'content',
-        payload: { 
-          content: newContent,
-          sessionId: sessionIdRef.current
-        }
+        payload: { content: newContent, sessionId: sessionIdRef.current }
       });
     }
-    // --- Mention notification logic ---
+    // Mention notification logic
     if (user && currentPage) {
       const prevMentioned = mentionedUserIdsRef.current;
       const currentMentioned = extractMentionedUserIds(newContent);
-      // Find new mentions
       const newMentions = currentMentioned.filter(
         (id) => id !== user.id && !prevMentioned.includes(id)
       );
       mentionedUserIdsRef.current = currentMentioned;
       for (const mentionedUserId of newMentions) {
-        // Call API route instead of server action directly
         await fetch('/api/notify-mention', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -153,7 +138,6 @@ export default function EditorPage() {
         });
       }
     }
-    // --- End mention notification logic ---
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = setTimeout(async () => {
       if (currentPage) {
@@ -174,8 +158,8 @@ export default function EditorPage() {
   const handleSaveVersion = async () => {
     if (currentPage) {
       setSaving(true);
-      ignoreNextUpdateRef.current = true; // Mark to ignore next realtime update
-      lastSaveTimestampRef.current = Date.now(); // Record save time
+      ignoreNextUpdateRef.current = true;
+      lastSaveTimestampRef.current = Date.now();
       const summary = prompt('Enter a summary for this version (optional):');
       await updatePage({
         pageId: currentPage.id,
@@ -185,7 +169,6 @@ export default function EditorPage() {
         changeSummary: summary || 'Manual save',
       });
       setSaving(false);
-      // Reload page to get updated version number
       loadPage(currentPage.id);
     }
   };
@@ -204,21 +187,9 @@ export default function EditorPage() {
   };
 
   const handleVersionRestore = () => {
-    // Reload the page after restore
-    if (currentPage) {
-      loadPage(currentPage.id);
-    }
+    if (currentPage) loadPage(currentPage.id);
   };
 
-  if (loading) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <p className="text-gray-500">Loading editor...</p>
-      </div>
-    );
-  }
-
-  // Generate consistent user color
   const getUserColor = () => {
     if (!user?.id) return '#3B82F6';
     const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
@@ -226,8 +197,19 @@ export default function EditorPage() {
     return colors[hash % colors.length];
   };
 
+  if (loading && !currentPage) {
+    return (
+      <div className="h-full flex items-center justify-center bg-[#faf8ff]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 rounded-full border-2 border-[#004ac6] border-t-transparent animate-spin" />
+          <p className="text-sm text-[#434655]" style={{ fontFamily: 'JetBrains Mono, monospace' }}>Loading editor...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-full flex relative">
+    <div className="h-full flex flex-col bg-[#faf8ff] overflow-hidden relative">
       {/* Live Cursor Presence */}
       {user && currentPage && (
         <CursorPresence
@@ -241,147 +223,93 @@ export default function EditorPage() {
         />
       )}
 
-      {/* Page List Sidebar */}
-      <div className={cn(
-        'border-r bg-white overflow-y-auto transition-all duration-300 ease-in-out relative',
-        isSidebarCollapsed ? 'w-12 sm:w-14' : 'w-52 sm:w-56 md:w-64'
-      )}>
-        {/* Toggle Button */}
-        <button
-          onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-          className={cn(
-            'absolute top-3 sm:top-4 z-10 p-1 sm:p-1.5 bg-white border border-gray-200 rounded-md shadow-sm text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-gray-300',
-            isSidebarCollapsed 
-              ? 'right-1 sm:right-2 hover:scale-110' 
-              : 'right-3 sm:right-4'
-          )}
-          title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          {isSidebarCollapsed ? (
-            <ChevronRight className="w-3 h-3 sm:w-4 sm:h-4" />
-          ) : (
-            <ChevronLeft className="w-3 h-3 sm:w-4 sm:h-4" />
-          )}
-        </button>
-
-        {/* Header Section - Matches Project Sidebar Height */}
-        <div className={cn(
-          'border-b border-gray-200 min-h-[60px] sm:min-h-[68px] md:min-h-[73px] flex items-center transition-all duration-300 ease-in-out',
-          isSidebarCollapsed ? 'p-1 sm:p-2 justify-center' : 'p-3 sm:p-4 pr-10 sm:pr-12'
-        )}>
-          {!isSidebarCollapsed && (
-            <div className="flex items-center justify-between w-full">
-              <h3 className="font-semibold text-sm sm:text-base">Pages</h3>
-              <Button size="sm" onClick={handleCreatePage}>
-                <Plus className="w-4 h-4" />
-              </Button>
-            </div>
-          )}
-          {isSidebarCollapsed && (
-            <button
-              onClick={handleCreatePage}
-              className="p-1.5 hover:bg-gray-100 rounded-md transition focus:outline-none focus:ring-2 focus:ring-gray-300"
-              title="Create New Page"
-            >
-              <Plus className="w-4 h-4 text-gray-600" />
-            </button>
-          )}
+      {/* Top utility bar */}
+      <div className="flex-none border-b border-[#c3c6d7]/30 bg-white/90 backdrop-blur-md px-4 sm:px-6 h-12 flex items-center justify-between gap-4 z-20">
+        {/* Breadcrumb */}
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-1.5 text-xs text-[#434655] min-w-0" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+            <span className="text-[#737686] truncate max-w-[100px]">{project?.name || 'Project'}</span>
+            <span className="text-[#c3c6d7]">/</span>
+            <span className="text-[#131b2e] font-semibold truncate max-w-[160px]">
+              {currentPage?.title || 'No page selected'}
+            </span>
+          </div>
+          {/* Autosave indicator */}
+          <div className="hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 text-[11px]" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Synced</span>
+          </div>
         </div>
 
-        {/* Sidebar Content - Expanded State */}
-        {!isSidebarCollapsed && (
-          <div className="p-3 sm:p-4">
-            <div className="space-y-1">
-              {pages.map((page) => (
-                <div
-                  key={page.id}
-                  onClick={() => loadPage(page.id)}
-                  className={`flex items-center gap-2 p-2 rounded cursor-pointer transition ${
-                    currentPage?.id === page.id
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'hover:bg-gray-50'
-                  }`}
-                >
-                  <FileText className="w-4 h-4 shrink-0" />
-                  <span className="text-sm truncate">{page.title}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Collapsed State - Show Icons Only */}
-        {isSidebarCollapsed && (
-          <div className="p-1 sm:p-2 space-y-1 sm:space-y-2">
-            {pages.map((page) => (
-              <button
-                key={page.id}
-                onClick={() => loadPage(page.id)}
-                className={cn(
-                  'w-full p-1.5 sm:p-2 rounded-md transition focus:outline-none focus:ring-2 focus:ring-gray-300',
-                  currentPage?.id === page.id
-                    ? 'bg-blue-50 text-blue-700'
-                    : 'hover:bg-gray-100 text-gray-600'
-                )}
-                title={page.title}
-              >
-                <FileText className="w-4 h-4 mx-auto" />
-              </button>
-            ))}
-          </div>
-        )}
+        {/* Right side actions */}
+        <div className="flex items-center gap-2 shrink-0">
+          {currentPage?.id && (
+            <ActiveUsers roomId={currentPage.id} roomType="page" />
+          )}
+          <button
+            onClick={handleSaveVersion}
+            disabled={saving || !currentPage}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#f2f3ff] hover:bg-[#eaedff] border border-[#c3c6d7]/60 hover:border-[#004ac6]/40 text-[#131b2e] text-xs font-semibold transition-all disabled:opacity-40"
+            style={{ fontFamily: 'JetBrains Mono, monospace' }}
+          >
+            <span className="material-symbols-outlined text-[15px] text-[#004ac6]">bookmark_add</span>
+            <span className="hidden sm:inline">{saving ? 'Saving…' : 'Save Version'}</span>
+          </button>
+          {currentPage && (
+            <VersionHistory
+              pageId={currentPage.id}
+              projectId={projectId}
+              currentVersion={currentPage.current_version}
+              onRestore={handleVersionRestore}
+            />
+          )}
+        </div>
       </div>
 
-      {/* Editor */}
-      <div className="flex-1 flex flex-col bg-gray-50">
+      {/* Editor canvas — full width */}
+      <div className="flex-1 overflow-y-auto sg-scrollbar pb-32">
         {currentPage ? (
-          <>
-            <div className="border-b p-4 bg-white flex items-center justify-between">
-              <div className="flex-1 flex items-center gap-4">
-                <div className="flex-1 min-w-0">
-                  <h1 className="text-2xl font-bold truncate">{currentPage.title}</h1>
-                  <p className="text-sm text-gray-600">Version {currentPage.current_version}</p>
-                </div>
-                {currentPage.id && (
-                  <div className="shrink-0">
-                    <ActiveUsers roomId={currentPage.id} roomType="page" />
-                  </div>
-                )}
-              </div>
-              <div className="flex gap-2 ml-4">
-                <Button variant="outline" size="sm" onClick={handleSaveVersion}>
-                  Save Version
-                </Button>
-                <VersionHistory
-                  pageId={currentPage.id}
-                  projectId={projectId}
-                  currentVersion={currentPage.current_version}
-                  onRestore={handleVersionRestore}
-                />
-              </div>
-            </div>
-            
-            <div className="flex-1 p-6 overflow-hidden">
-              <AdvancedEditor
-                content={content}
-                onChange={handleContentChange}
-                placeholder="Start writing your document..."
-                projectId={projectId}
-              />
-            </div>
-          </>
+          <div className="w-full px-6 sm:px-14 lg:px-28 xl:px-40 py-8">
+            <AdvancedEditor
+              content={content}
+              onChange={handleContentChange}
+              placeholder="Start writing your document…"
+              projectId={projectId}
+            />
+          </div>
         ) : (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <p className="text-gray-600 mb-4">No page selected</p>
-              <Button onClick={handleCreatePage}>
-                <Plus className="w-4 h-4 mr-2" />
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center space-y-5">
+              <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-[#eaedff] to-[#dbe1ff] flex items-center justify-center mx-auto shadow-md">
+                <span className="material-symbols-outlined text-[#004ac6] text-[38px]" style={{ fontVariationSettings: "'FILL' 1" }}>description</span>
+              </div>
+              <div>
+                <p className="text-[#131b2e] font-bold text-lg" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>No document open</p>
+                <p className="text-[#737686] text-sm mt-1" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>Click the dock below to create or switch pages.</p>
+              </div>
+              <button
+                onClick={handleCreatePage}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#004ac6] hover:bg-[#003ea8] text-white text-sm font-semibold shadow-md shadow-blue-500/25 active:scale-95 transition-all"
+                style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}
+              >
+                <span className="material-symbols-outlined text-[18px]">add_circle</span>
                 Create First Page
-              </Button>
+              </button>
             </div>
           </div>
         )}
       </div>
+
+      {/* Dock — only shown on editor, handles pages via flyout */}
+      {project && (
+        <ProjectDock
+          project={project}
+          pages={pages}
+          currentPageId={currentPage?.id}
+          onPageSelect={loadPage}
+          onCreatePage={handleCreatePage}
+        />
+      )}
     </div>
   );
 }
