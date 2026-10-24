@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { NotificationBell } from './notification-bell';
+import { InviteInbox } from './invite-inbox';
 
 export default function Navbar() {
   const router = useRouter();
@@ -17,6 +18,7 @@ export default function Navbar() {
   useEffect(() => {
     const getUserData = async () => {
       const { data: { user } } = await supabase.auth.getUser();
+      await fetch('/api/profile/ensure', { method: 'POST' });
       if (user?.user_metadata?.full_name) {
         setUserName(user.user_metadata.full_name);
       } else if (user?.email) {
@@ -67,6 +69,7 @@ export default function Navbar() {
       <div className="flex items-center gap-2 md:gap-3">
         {/* Notification Bell */}
         <NotificationBell />
+        <InviteInbox />
 
         {/* Profile Dropdown */}
         <div className="relative" ref={dropdownRef}>

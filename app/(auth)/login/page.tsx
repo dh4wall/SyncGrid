@@ -58,6 +58,7 @@ function LoginForm() {
       setError(error.message);
       setLoading(false);
     } else {
+      await fetch('/api/profile/ensure', { method: 'POST' });
       setSuccess(true);
       const next = searchParams.get('next');
       const destination = next?.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';

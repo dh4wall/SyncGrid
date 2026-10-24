@@ -2,6 +2,7 @@
 
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { createInvitation } from '@/lib/invitations';
 
 export async function inviteMemberByEmail(data: {
   projectId: string;
@@ -9,78 +10,21 @@ export async function inviteMemberByEmail(data: {
   role: 'admin' | 'editor' | 'viewer';
 }) {
   const supabase = await createServerSupabaseClient();
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Unauthorized');
-
-  // Normalize email
-  const normalizedEmail = data.email.trim().toLowerCase();
-
-  // Check if user exists - handle the case where user might not exist yet
-  const { data: inviteeProfile } = await supabase
+  const { data: profile } = await supabase
     .from('profiles')
-    .select('id, email')
-    .eq('email', normalizedEmail)
+    .select('id')
+    .eq('email', data.email.trim().toLowerCase())
     .maybeSingle();
+  if (!profile) throw new Error('User not found on this platform');
 
-  // If user doesn't exist, we'll create a pending invitation anyway
-  // When they sign up, they can claim the invitation
-  let inviteeUserId = null;
-  
-  if (inviteeProfile) {
-    inviteeUserId = inviteeProfile.id;
-    
-    // Check if already a member
-    const { data: existingMember } = await supabase
-      .from('project_members')
-      .select('id, invitation_status')
-      .eq('project_id', data.projectId)
-      .eq('user_id', inviteeUserId)
-      .maybeSingle();
-
-    if (existingMember) {
-      if (existingMember.invitation_status === 'active') {
-        throw new Error('User is already a member');
-      } else {
-        throw new Error('User already has a pending invitation');
-      }
-    }
-  } else {
-    // Check for existing email-based invitation
-    const { data: existingEmailInvite } = await supabase
-      .from('project_members')
-      .select('id, invitation_status')
-      .eq('project_id', data.projectId)
-      .eq('invited_email', normalizedEmail)
-      .maybeSingle();
-
-    if (existingEmailInvite) {
-      throw new Error('An invitation has already been sent to this email');
-    }
-  }
-
-  // Generate invitation token
-  const invitationToken = crypto.randomUUID();
-
-  // Create invitation
-  const { data: invitation, error } = await supabase
-    .from('project_members')
-    .insert({
-      project_id: data.projectId,
-      user_id: inviteeUserId, // null if user doesn't exist yet
-      invited_email: normalizedEmail,
-      role: data.role,
-      invited_by: user.id,
-      invitation_status: 'pending',
-      invitation_token: invitationToken
-    })
-    .select('invitation_token')
-    .single();
-
-  if (error) throw new Error(error.message);
-
+  const result = await createInvitation({
+    projectId: data.projectId,
+    userId: profile.id,
+    role: data.role,
+  });
+  if ('error' in result) throw new Error(result.error);
   revalidatePath(`/projects/${data.projectId}/settings`);
-  return { invitationToken: invitation.invitation_token };
+  return { invitationToken: result.invitationToken };
 }
 
 export async function acceptInvitation(invitationToken: string) {

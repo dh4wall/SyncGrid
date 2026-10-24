@@ -149,6 +149,25 @@ body {
 .sg-scrollbar-thin::-webkit-scrollbar {
   width: 4px;
 }
+.sg-scrollbar-dialog {
+  scrollbar-width: thin;
+  scrollbar-color: #9aa4c2 #eaedff;
+}
+.sg-scrollbar-dialog::-webkit-scrollbar {
+  width: 7px;
+}
+.sg-scrollbar-dialog::-webkit-scrollbar-track {
+  background: #eaedff;
+  border-radius: 99px;
+}
+.sg-scrollbar-dialog::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #2563eb, #004ac6);
+  border: 2px solid #eaedff;
+  border-radius: 99px;
+}
+.sg-scrollbar-dialog::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #1a65e8, #003ea8);
+}
 .sg-scrollbar-h::-webkit-scrollbar {
   height: 4px;
 }

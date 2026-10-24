@@ -308,7 +308,7 @@ export default function ProjectDock({
         </div>
 
         {/* Quick nav shortcuts */}
-        <div className="border-t border-[#c3c6d7]/20 pt-2 grid grid-cols-2 gap-1.5">
+        <div className="border-t border-[#c3c6d7]/20 pt-3 grid grid-cols-2 gap-3">
           <button
             onClick={goBoard}
             className={cn(
@@ -341,7 +341,7 @@ export default function ProjectDock({
           onMouseMove={(e) => setMouseX(e.clientX)}
           onMouseLeave={() => setMouseX(null)}
           className={cn(
-            'pointer-events-auto flex items-end gap-3',
+            'pointer-events-auto flex items-end gap-5 sm:gap-6',
             // Large glassy pill
             'px-5 py-3 rounded-[28px]',
             'bg-white/55 backdrop-blur-3xl',

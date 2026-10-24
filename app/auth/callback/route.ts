@@ -53,6 +53,24 @@ export async function GET(request: Request) {
     const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!exchangeError) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const fullName =
+          typeof user.user_metadata?.full_name === 'string'
+            ? user.user_metadata.full_name.trim()
+            : '';
+        const { error: profileError } = await supabase.from('profiles').upsert(
+          {
+            id: user.id,
+            email: user.email || '',
+            full_name: fullName || null,
+          },
+          { onConflict: 'id' }
+        );
+        if (profileError) {
+          console.error('OAuth profile ensure failed:', profileError);
+        }
+      }
       // Ensure redirect to a relative path on baseUrl
       const redirectPath = next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
       return NextResponse.redirect(new URL(redirectPath, baseUrl));

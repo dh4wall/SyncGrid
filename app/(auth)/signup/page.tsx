@@ -44,6 +44,7 @@ function SignupForm() {
       setLoading(false);
     } else if (data.session) {
       // Auto-confirmed (e.g. email confirmation disabled in Supabase)
+      await fetch('/api/profile/ensure', { method: 'POST' });
       const next = searchParams.get('next');
       const destination = next?.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
       router.push(destination);

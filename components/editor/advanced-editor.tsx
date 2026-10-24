@@ -165,13 +165,6 @@ export function AdvancedEditor({
     },
   }, [extensions, editable]); // Only recreate if extensions or editable changes
 
-  // Update editor content when content prop changes
-  useEffect(() => {
-    if (editor && content && editor.getHTML() !== content) {
-      editor.commands.setContent(content);
-    }
-  }, [editor, content]);
-
   const handleInsertTable = (rows: number, cols: number) => {
     if (editor) {
       editor
@@ -193,18 +186,18 @@ export function AdvancedEditor({
 
   // Sync external content changes to the editor (for real-time updates)
   useEffect(() => {
-    if (editor && content !== undefined) {
-      const currentContent = editor.getHTML();
-      // Only update if content is different to avoid cursor jumps
-      if (currentContent !== content) {
-        // Use setTimeout to defer the update and avoid flushSync errors
-        setTimeout(() => {
-          if (editor && !editor.isDestroyed) {
-            editor.commands.setContent(content, { emitUpdate: false });
-          }
-        }, 0);
+    if (!editor || content === undefined || editor.isDestroyed) return;
+
+    const currentContent = editor.getHTML();
+    if (currentContent === content) return;
+
+    const syncTimer = window.setTimeout(() => {
+      if (!editor.isDestroyed && editor.getHTML() !== content) {
+        editor.commands.setContent(content, { emitUpdate: false });
       }
-    }
+    }, 0);
+
+    return () => window.clearTimeout(syncTimer);
   }, [content, editor]);
 
   // Don't render until mounted to avoid hydration mismatch

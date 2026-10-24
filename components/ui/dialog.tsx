@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { X } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 
 interface DialogProps {
@@ -11,18 +11,21 @@ interface DialogProps {
 }
 
 export function Dialog({ open, onOpenChange, children }: DialogProps) {
-  if (!open) return null;
+  if (!open || typeof document === 'undefined') return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div
-        className="fixed inset-0 bg-black/50"
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex min-h-full items-center justify-center overflow-y-auto p-4 sm:p-6">
+      <button
+        type="button"
+        aria-label="Close dialog"
+        className="fixed inset-0 cursor-default bg-slate-950/55 backdrop-blur-[2px]"
         onClick={() => onOpenChange(false)}
       />
-      <div className="relative z-50 w-full max-w-lg mx-4">
+      <div className="relative z-[101] mx-auto flex w-full max-w-[calc(100vw-2rem)] items-center justify-center sm:max-w-[calc(100vw-3rem)]">
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -36,7 +39,7 @@ export function DialogContent({
   return (
     <div
       className={cn(
-        'bg-white rounded-xl shadow-xl p-6 max-h-[90vh] overflow-y-auto',
+        'mx-auto w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_24px_80px_rgba(15,23,42,0.24)] sm:p-6',
         className
       )}
     >
