@@ -35,7 +35,7 @@ function SignupForm() {
       password,
       options: {
         data: { full_name: name },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(searchParams.get('next') || '/dashboard')}`,
       },
     });
 
@@ -44,7 +44,9 @@ function SignupForm() {
       setLoading(false);
     } else if (data.session) {
       // Auto-confirmed (e.g. email confirmation disabled in Supabase)
-      router.push('/dashboard');
+      const next = searchParams.get('next');
+      const destination = next?.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
+      router.push(destination);
       router.refresh();
     } else {
       // Email confirmation required
@@ -60,7 +62,7 @@ function SignupForm() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(searchParams.get('next') || '/dashboard')}`,
         queryParams: {
           access_type: 'offline',
           prompt: 'select_account',

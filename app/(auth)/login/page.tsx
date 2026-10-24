@@ -59,7 +59,9 @@ function LoginForm() {
       setLoading(false);
     } else {
       setSuccess(true);
-      router.push('/dashboard');
+      const next = searchParams.get('next');
+      const destination = next?.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
+      router.push(destination);
       router.refresh();
     }
   };
@@ -71,7 +73,7 @@ function LoginForm() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(searchParams.get('next') || '/dashboard')}`,
         queryParams: {
           access_type: 'offline',
           prompt: 'select_account',

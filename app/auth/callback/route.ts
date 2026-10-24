@@ -54,7 +54,7 @@ export async function GET(request: Request) {
 
     if (!exchangeError) {
       // Ensure redirect to a relative path on baseUrl
-      const redirectPath = next.startsWith('/') ? next : `/${next}`;
+      const redirectPath = next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
       return NextResponse.redirect(new URL(redirectPath, baseUrl));
     }
   }
